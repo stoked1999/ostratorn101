@@ -29,3 +29,5 @@ Makefile
 *.swp
 Thumbs.db
 desktop.ini
+build-ui.log
+build-plugin-msvc.log
