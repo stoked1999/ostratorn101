@@ -1,6 +1,10 @@
 # Build outputs
 build/
 build-plugin/
+build-plugin-msvc/
+build-plugin-msvc.log
+build-plugin-log.txt
+buildtools-install.log
 *.exe
 *.pdb
 *.obj
