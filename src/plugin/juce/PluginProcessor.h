@@ -1,26 +1,31 @@
 // JUCE VST3/Standalone wrapper for the SH-101 model.
 //
-// STATUS: NOT COMPILED/VALIDATED IN THE DEVELOPMENT ENVIRONMENT.
-// The machine this project was built on has no MSVC C++ toolchain (Visual Studio
-// 2022 is installed without the "Desktop development with C++" workload) and no
-// JUCE checkout, so the plugin shell could not be built there.  Everything it
-// depends on *is* compiled and tested: the whole voice and the host-facing layer
-// (sh101::SH101HostAdapter, covered by tests/test_host_adapter.cpp).  This file
-// is therefore a conventional JUCE shell over verified code — treat it as
-// unverified until it builds.  See docs/VST3.md for the exact build steps.
-//
 // Design notes:
 //   * The processor owns a sh101::SH101HostAdapter and does no DSP of its own.
-//   * All 34 SH-101 parameters are exposed as normalized 0..1
-//     AudioParameterFloats; the taper to engineering units lives in Params.h, so
-//     automation lanes, the editor and the DSP all agree on the mapping.
+//   * Every SH-101 control is exposed as a host parameter.  Continuous controls
+//     are normalized 0..1 floats; the switch-like controls (range, sub mode,
+//     PWM source, trigger mode, VCA mode, portamento mode, arp mode, arp/seq
+//     on) are choice parameters so the host and the editor can show the real
+//     position names instead of anonymous numbers.  Both kinds carry the same
+//     normalized value the engine's taper expects (see src/sh101/Params.h), so
+//     automation, the editor and the DSP agree.
+//   * The preset bank (src/sh101/Presets.h) is exposed as the plugin's programs,
+//     so a host shows the presets in its own preset list as well as in the
+//     editor.
 //   * Parameters are pushed to the adapter once per block, not once per
 //     parameter, so a block performs a single parameter commit.
+//
+// Threading note: a preset may carry a sequencer pattern.  The pattern lives in
+// the engine's sequence memory, not in the parameter tree, so it is handed to
+// the audio thread through an atomic index and applied at the top of the next
+// block.  The message thread never writes it, which keeps the sequence memory
+// single-writer without locks or allocation in the callback.
 #pragma once
 
 #include <juce_audio_processors/juce_audio_processors.h>
 
 #include <array>
+#include <atomic>
 #include <vector>
 
 #include "plugin/SH101HostAdapter.h"
@@ -44,14 +49,21 @@ public:
     bool isMidiEffect() const override { return false; }
     double getTailLengthSeconds() const override { return 0.5; }
 
-    int getNumPrograms() override { return 1; }
-    int getCurrentProgram() override { return 0; }
-    void setCurrentProgram(int) override {}
-    const juce::String getProgramName(int) override { return {}; }
+    // The preset bank is the plugin's program list.
+    int getNumPrograms() override;
+    int getCurrentProgram() override;
+    void setCurrentProgram(int index) override;
+    const juce::String getProgramName(int index) override;
     void changeProgramName(int, const juce::String&) override {}
 
     void getStateInformation(juce::MemoryBlock& destData) override;
     void setStateInformation(const void* data, int sizeInBytes) override;
+
+    // ---- Presets ----------------------------------------------------------
+    // Loads every control from the preset bank and queues the preset's
+    // sequencer pattern (if it has one) for the audio thread.
+    void loadPreset(int index);
+    int currentPresetIndex() const { return currentPreset_.load(std::memory_order_relaxed); }
 
     // Exposed for the editor.
     juce::AudioProcessorValueTreeState& parameters() { return apvts_; }
@@ -65,9 +77,15 @@ public:
 private:
     juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
 
+    void applyPendingPattern();
+
     sh101::SH101HostAdapter adapter_{};
     juce::AudioProcessorValueTreeState apvts_;
     std::array<std::atomic<float>*, sh101::kNumParams> parameterPointers_{};
+
+    // 0 = nothing pending, otherwise (preset index + 1).
+    std::atomic<int> pendingPatternIndex_{ 0 };
+    std::atomic<int> currentPreset_{ 0 };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(SH101AudioProcessor)
 };

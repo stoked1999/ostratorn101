@@ -1,0 +1,31 @@
+== configuring ==
+-- Configuring juceaide
+-- Building juceaide
+-- Exporting juceaide
+-- Testing juceaide
+-- Finished setting up juceaide
+CMake Warning at C:/Users/bbhal/juce-src/extras/Build/CMake/JUCEUtils.cmake:1769 (message):
+  Target SH101Plugin has JUCE_BUNDLE_ID 'com.SH101 Emulation
+  Project.SH101Plugin', which contains spaces.  Use the BUNDLE_ID option to
+  specify a valid ID.
+Call Stack (most recent call first):
+  C:/Users/bbhal/juce-src/extras/Build/CMake/JUCEUtils.cmake:2165 (_juce_set_fallback_properties)
+  C:/Users/bbhal/juce-src/extras/Build/CMake/JUCEUtils.cmake:2248 (_juce_initialise_target)
+  src/plugin/juce/CMakeLists.txt:13 (juce_add_plugin)
+
+
+-- Configuring done (1.1s)
+-- Generating done (0.2s)
+-- Build files have been written to: C:/Users/bbhal/sh101/build-plugin-msvc
+== building VST3 ==
+[0/2] Re-checking globbed directories...
+[1/4] Building VST3 manifest helper for SH101Plugin
+-- Configuring done (0.1s)
+-- Generating done (0.0s)
+-- Build files have been written to: C:/Users/bbhal/sh101/build-plugin-msvc/vst3_helpers/SH101Plugin
+ninja: no work to do.
+[2/4] Building CXX object CMakeFiles\sh101_host_test.dir\tools\vst3_host_test.cpp.obj
+C:\Users\bbhal\sh101\tools\vst3_host_test.cpp(169): warning C4996: 'juce::AudioProcessor::createEditorIfNeeded': Prefer createEditorAndMakeActive()
+[3/4] Linking CXX executable sh101_host_test_artefacts\Release\sh101_host_test.exe
+== done ==
+EXIT=0

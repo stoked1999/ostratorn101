@@ -7,10 +7,15 @@ brief in [`docs/engineering-brief.md`](docs/engineering-brief.md) (revision
 history).
 
 Status: **the DSP voice is complete and validated, and the VST3 plugin is built,
-installed and verified** — it scans as an instrument, reports its 34 parameters,
-accepts MIDI and produces audio when loaded through a host
-(`tools/vst3_host_test.cpp`). It is installed at `C:\Users\bbhal\VST3\SH-101.vst3`;
-see [docs/VST3.md](docs/VST3.md) for how to point Ableton Live at it.
+installed and verified** — it scans as an instrument, reports its 34 parameters
+(10 of them named switch positions rather than anonymous numbers), accepts MIDI,
+produces audio, and opens a panel UI with engineering-unit read-outs. The preset
+bank (21 patches) is exposed both in the panel and as the plugin's host programs.
+
+Installed at `C:\Program Files\Common Files\VST3\SH-101.vst3` (Live's default
+VST3 folder), with copies at `C:\Program Files (x86)\Common Files\VST3\SH-101.vst3`
+and `C:\Users\bbhal\VST3\SH-101.vst3`. See [docs/VST3.md](docs/VST3.md) for the
+build steps, the install scripts and how Live finds it.
 
 ## What exists
 
@@ -36,13 +41,15 @@ src/sh101/          the voice — one class per block, named after the brief's o
 
 src/plugin/         host-facing layer
   SH101HostAdapter    MIDI, automation, sustain pedal, panic, block rendering
-  juce/               VST3/Standalone shell (UNVERIFIED — see docs/VST3.md)
-
-tests/              57 test cases / 413 checks — the acceptance evidence
-tools/              render_cli (WAV), bench_cli (CPU), alias_probe, adapter_probe,
+  juce/               VST3/Standalone shell: processor, editor, panel look-and-feel
+src/sh101/Presets.h   21-patch preset bank (data + sequencer patterns)
+tests/              64 test cases / 1612 checks — the acceptance evidence
+tools/              render_cli (WAV, incl. --preset), bench_cli (CPU), alias_probe,
+                    adapter_probe, editor_test (panel + preset smoke test),
                     verify_renders.py, check_no_alloc.py
 docs/               engineering brief, validation report, approximation register
-renders/            WAV renders of eight demo patches
+renders/            WAV renders of eight demo patches + renders/presets/ (21 patches)
+                    + renders/plugin_ui.png (the panel, drawn by the editor test)
 ```
 
 ## Build and run

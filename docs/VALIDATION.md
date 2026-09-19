@@ -8,13 +8,21 @@ stated explicitly rather than implied by a tight tolerance.
 ## How to reproduce
 
 ```bash
-bash build.sh && ./build/sh101_tests.exe          # 57 cases, 413 checks, exit 0 = pass
+bash build.sh && ./build/sh101_tests.exe          # 64 cases, 1612 checks, exit 0 = pass
 ./build/sh101_tests.exe filter                    # substring filter for one area
+./build/sh101_tests.exe preset                    # the preset bank alone (7 cases)
 ./build/sh101_bench.exe 5                         # CPU
 ./build/alias_probe.exe 44100                     # oscillator alias table
 ./build/adapter_probe.exe                         # host-layer / gate-event trace
+./build/sh101_render.exe --list-presets           # the preset bank
+./build/sh101_render.exe --preset "Acid Bass" renders/acid.wav
 python tools/verify_renders.py                    # rendered WAV inspection
 python tools/check_no_alloc.py                    # static no-allocation check
+
+# Panel UI + preset plumbing (needs the JUCE build; writes the PNG it checks)
+MSYS_NO_PATHCONV=1 cmd /c "C:\\Users\\bbhal\\sh101\\tools\\build_vst3_msvc.bat"
+./build-plugin-msvc/src/plugin/juce/sh101_editor_test_artefacts/Release/sh101_editor_test.exe renders/plugin_ui.png
+./build-plugin-msvc/sh101_host_test_artefacts/Release/sh101_host_test.exe "C:/Program Files/Common Files/VST3/SH-101.vst3"
 ```
 
 ## The brief's validation list, mapped to tests
@@ -97,6 +105,47 @@ Eight demo patches are rendered by `sh101_render` and checked by
 | sub | 0.469 | 0.1331 | −17.5 | 156 Hz |
 | arp | 0.412 | 0.0690 | −23.2 | 1418 Hz |
 | sequencer | 0.401 | 0.0579 | −24.7 | 796 Hz |
+
+## Preset bank (21 patches)
+
+`src/sh101/Presets.h` holds the bank; `build/sh101_tests.exe preset` validates it
+(7 cases, 1196 checks). A preset is a claim — "this will sound like X" — so what
+is checked is what a test can check:
+
+| Check | Result |
+| --- | --- |
+| bank well formed (names, categories from the panel's own vocabulary, unique names) | 21 patches, 9 categories |
+| every control inside its documented range | `getNormalized` in 0..1 for all 34 controls × 21 patches |
+| survives the host round-trip (engine value → 0..1 parameter → engine value) | exact for every control; a drift would be reported by name |
+| differs from the reference patch | every preset changes ≥ 4 controls |
+| produces sound | all 21 audible, finite, peak 0.09…0.70 (no silence, no clipping) |
+| switch controls sit on real positions and have names | 10 switch controls, all positions named |
+| sequenced presets carry a pattern | 2 patched sequences, 8 steps each, repeated notes rejected |
+
+Every patch is also rendered to `renders/presets/` (`sh101_render --preset N`) so
+the sounds can be auditioned without a DAW. Musical quality is not something a
+test can assert; the bank is named after the sounds the instrument is known for
+(acid bass, PWM strings, self-oscillation, sequencer lines) and every value is a
+documented control position on this model — not a copy of anyone's patch sheet.
+
+## Editor / preset smoke test (JUCE build)
+
+`tools/editor_test.cpp` builds the plugin's own editor (VST3 hosting cannot see
+into it) and snapshots it to `renders/plugin_ui.png`. 16 checks, all passing:
+
+| Check | Measured |
+| --- | --- |
+| preset bank exposed as host programs | 21 programs, e.g. `Bass: Acid Bass` |
+| loading a program moves every control | 0 mismatches over 34 controls |
+| a sequenced preset programs the engine | 8 steps, notes 36 36 48 39 36 51 48 43 |
+| a loaded preset makes sound | peak 0.3831 |
+| editor lays out and paints | 908×576, 76 children, 0 with no size, 77.7% of the window painted, amber accents in 4/4 bands |
+| read-outs are in engineering units | `5.00Hz`, not `0.6858647` |
+
+Two real bugs were found by this test and fixed: the editor sized itself before
+its controls existed (blank window), and `LookAndFeel_V4`'s slider layout left a
+56-pixel fader a 17-pixel groove, so the custom fader drawing returned early
+(invisible faders). Both are described in [VST3.md](VST3.md).
 
 ## Outstanding (needs hardware or a measurement set)
 

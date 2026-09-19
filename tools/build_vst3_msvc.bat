@@ -39,7 +39,7 @@ if errorlevel 1 (
 )
 
 echo == building VST3 ==
-"%CMAKE%" --build "%BUILD%" --target SH101Plugin_VST3 sh101_host_test
+"%CMAKE%" --build "%BUILD%" --target SH101Plugin_VST3 sh101_host_test sh101_editor_test
 if errorlevel 1 (
     echo == build failed ==
     exit /b 1

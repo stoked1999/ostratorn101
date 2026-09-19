@@ -17,6 +17,7 @@
 #include <string>
 #include <vector>
 
+#include "sh101/Presets.h"
 #include "sh101/SH101Engine.h"
 
 using namespace sh101;
@@ -172,6 +173,7 @@ int main(int argc, char** argv) {
     double seconds = 0.0;
     double sampleRate = 48000.0;
     int oversample = 2;
+    int presetIndex = -1;          // -1 = use --patch instead
 
     for (int i = 1; i < argc; ++i) {
         const std::string a = argv[i];
@@ -181,6 +183,25 @@ int main(int argc, char** argv) {
                 std::printf("  %-10s %s\n", kPatches[i2].name, kPatches[i2].description);
             }
             return 0;
+        } else if (a == "--list-presets") {
+            const int count = numPresets();
+            std::printf("presets (%d):\n", count);
+            for (int i2 = 0; i2 < count; ++i2) {
+                const PresetInfo& p = preset(i2);
+                std::printf("  %2d  %-6s %-18s %s\n", i2, p.category, p.name, p.description);
+            }
+            return 0;
+        } else if (a == "--preset" && i + 1 < argc) {
+            const std::string arg = argv[++i];
+            presetIndex = findPresetByName(arg.c_str());
+            if (presetIndex < 0 && !arg.empty() && (arg[0] >= '0' && arg[0] <= '9')) {
+                const int asIndex = std::atoi(arg.c_str());
+                if (asIndex >= 0 && asIndex < numPresets()) presetIndex = asIndex;
+            }
+            if (presetIndex < 0) {
+                std::printf("error: unknown preset '%s' (see --list-presets)\n", arg.c_str());
+                return 2;
+            }
         } else if (a == "--patch" && i + 1 < argc) {
             patchName = argv[++i];
         } else if (a == "--seconds" && i + 1 < argc) {
@@ -191,7 +212,8 @@ int main(int argc, char** argv) {
             oversample = std::atoi(argv[++i]);
         } else if (a == "--help" || a == "-h") {
             std::printf("usage: sh101_render [--patch NAME] [--seconds S] [--sr HZ] [--os 1|2|4] out.wav\n"
-                        "       sh101_render --list\n");
+                        "       sh101_render --preset NAME|INDEX [--seconds S] out.wav\n"
+                        "       sh101_render --list | --list-presets\n");
             return 0;
         } else if (!a.empty() && a[0] != '-') {
             outPath = a;
@@ -206,8 +228,31 @@ int main(int argc, char** argv) {
         return 2;
     }
 
-    Patch patch = makePatch(patchName);
-    setDefaultsForRender(patch.params);
+    Patch patch;
+    if (presetIndex >= 0) {
+        // A preset states its own control positions, so the generic render
+        // defaults must not overwrite them.
+        const PresetInfo& info = preset(presetIndex);
+        patch.params = makePresetParams(presetIndex);
+
+        if (patch.params.arpOn) {
+            patch.arp = true;
+            patch.arpHeld = { 48, 52, 55 };
+            patch.noteSeconds = 2.0;
+        } else if (patch.params.seqOn) {
+            patch.seq = true;
+            patch.noteSeconds = 2.0;
+        } else {
+            patch.notes = { 36, 48, 60, 48 };
+            patch.noteSeconds = 0.5;
+        }
+        if (info.applySequence == nullptr && !patch.seq) {
+            patch.seqSteps.clear();
+        }
+    } else {
+        patch = makePatch(patchName);
+        setDefaultsForRender(patch.params);
+    }
 
     SH101Engine engine;
     engine.prepare(sampleRate, oversample);
@@ -215,10 +260,18 @@ int main(int argc, char** argv) {
     engine.setParams(patch.params);
 
     if (patch.seq) {
-        engine.sequencer().setLength(static_cast<int>(patch.seqSteps.size()));
-        for (size_t i = 0; i < patch.seqSteps.size(); ++i) {
-            engine.sequencer().setStep(static_cast<int>(i), patch.seqSteps[i][0],
-                                       patch.seqSteps[i][1] != 0, patch.seqSteps[i][2] != 0);
+        void (*applySequence)(StepSequencer&) =
+            (presetIndex >= 0) ? preset(presetIndex).applySequence : nullptr;
+        if (applySequence != nullptr) {
+            // The preset carries its own pattern (the sequence memory, not a panel
+            // control), so the pattern comes from the preset rather than the CLI.
+            applySequence(engine.sequencer());
+        } else {
+            engine.sequencer().setLength(static_cast<int>(patch.seqSteps.size()));
+            for (size_t i = 0; i < patch.seqSteps.size(); ++i) {
+                engine.sequencer().setStep(static_cast<int>(i), patch.seqSteps[i][0],
+                                           patch.seqSteps[i][1] != 0, patch.seqSteps[i][2] != 0);
+            }
         }
     }
 
@@ -271,8 +324,9 @@ int main(int argc, char** argv) {
 
     double peak = 0.0;
     for (float s : audio) peak = std::max(peak, std::fabs(static_cast<double>(s)));
-    std::printf("wrote %s: patch=%s, %.2f s @ %.0f Hz, oversample=%dx, peak=%.3f, safetyResets=%d\n",
-                outPath.c_str(), patchName.c_str(),
+    std::printf("wrote %s: %s=%s, %.2f s @ %.0f Hz, oversample=%dx, peak=%.3f, safetyResets=%d\n",
+                outPath.c_str(), presetIndex >= 0 ? "preset" : "patch",
+                presetIndex >= 0 ? preset(presetIndex).name : patchName.c_str(),
                 static_cast<double>(audio.size()) / sampleRate, sampleRate, oversample, peak,
                 engine.safetyResetCount());
     return 0;

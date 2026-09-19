@@ -218,4 +218,86 @@ inline const char* paramName(int id) {
     return (id >= 0 && id < kNumParams) ? names[id] : "?";
 }
 
+// ---- Named positions for the switch-like controls ---------------------------
+// These controls are steps in the hardware, not continuous knobs.  The tables
+// below give each position a name so hosts and the editor can present them as
+// choices rather than as anonymous 0..1 faders.  The DSP keeps using the
+// normalized 0..1 value (applyNormalized maps it to the position), so nothing in
+// the audio path depends on the UI representation.
+struct ParamChoice {
+    int paramId;
+    const char* const* items;
+    int count;
+};
+
+inline const char* const* kLfoWaveItems(int& n) {
+    static const char* items[] = { "Triangle", "Square", "Random", "Noise" };
+    n = 4;
+    return items;
+}
+inline const char* const* kVcoRangeItems(int& n) {
+    static const char* items[] = { "16'", "8'", "4'", "2'" };
+    n = 4;
+    return items;
+}
+inline const char* const* kSubModeItems(int& n) {
+    static const char* items[] = { "-1 Oct Square", "-2 Oct Square", "-2 Oct Narrow" };
+    n = 3;
+    return items;
+}
+inline const char* const* kPwmSourceItems(int& n) {
+    static const char* items[] = { "ENV", "Manual", "LFO" };
+    n = 3;
+    return items;
+}
+inline const char* const* kEnvTriggerItems(int& n) {
+    static const char* items[] = { "Gate + Trig", "Gate", "LFO" };
+    n = 3;
+    return items;
+}
+inline const char* const* kVcaModeItems(int& n) {
+    static const char* items[] = { "ENV", "Gate" };
+    n = 2;
+    return items;
+}
+inline const char* const* kPortamentoModeItems(int& n) {
+    static const char* items[] = { "Off", "On", "Auto" };
+    n = 3;
+    return items;
+}
+inline const char* const* kArpModeItems(int& n) {
+    static const char* items[] = { "Up", "Down", "Up/Down" };
+    n = 3;
+    return items;
+}
+inline const char* const* kOnOffItems(int& n) {
+    static const char* items[] = { "Off", "On" };
+    n = 2;
+    return items;
+}
+
+// Returns the choice list for a switch-like parameter, or nullptr for
+// continuous parameters.
+inline const char* const* paramChoiceItems(int paramId, int& count) {
+    count = 0;
+    switch (paramId) {
+        case pLfoWave:        return kLfoWaveItems(count);
+        case pVcoRange:       return kVcoRangeItems(count);
+        case pSubMode:        return kSubModeItems(count);
+        case pPwmSource:      return kPwmSourceItems(count);
+        case pEnvTrigger:     return kEnvTriggerItems(count);
+        case pVcaMode:        return kVcaModeItems(count);
+        case pPortamentoMode: return kPortamentoModeItems(count);
+        case pArpMode:        return kArpModeItems(count);
+        case pArpOn:
+        case pSeqOn:          return kOnOffItems(count);
+        default:              return nullptr;
+    }
+}
+
+inline bool isChoiceParameter(int paramId) {
+    int count = 0;
+    return paramChoiceItems(paramId, count) != nullptr;
+}
+
 } // namespace sh101
