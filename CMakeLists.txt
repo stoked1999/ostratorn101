@@ -1,5 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
-project(SH101Emulation VERSION 0.1.0 LANGUAGES CXX)
+# LANGUAGES includes C because JUCE requires a C compiler for its targets.
+project(SH101Emulation VERSION 0.1.0 LANGUAGES C CXX)
 
 # ---------------------------------------------------------------------------
 # SH-101 emulation — build file.
@@ -82,4 +83,27 @@ if(SH101_BUILD_VST3)
     endif()
     add_subdirectory("${JUCE_DIR}" "${CMAKE_BINARY_DIR}/JUCE")
     add_subdirectory(src/plugin/juce)
+
+    # End-to-end check: load the built bundle through JUCE's own hosting classes,
+    # send it MIDI and render audio (tools/vst3_host_test.cpp).
+    juce_add_console_app(sh101_host_test PRODUCT_NAME "sh101_host_test")
+    target_sources(sh101_host_test PRIVATE tools/vst3_host_test.cpp)
+    target_link_libraries(sh101_host_test
+        PRIVATE
+            sh101_core
+            juce::juce_audio_processors
+            juce::juce_audio_utils
+        PUBLIC
+            juce::juce_recommended_config_flags
+            juce::juce_recommended_warning_flags)
+    target_compile_definitions(sh101_host_test PUBLIC
+        JUCE_WEB_BROWSER=0
+        JUCE_USE_CURL=0
+        JUCE_STANDALONE_APPLICATION=1
+        JUCE_MODAL_LOOPS_PERMITTED=1
+        # Hosting support: without this JUCE deletes addDefaultFormats().
+        JUCE_PLUGINHOST_VST3=1
+        JUCE_PLUGINHOST_VST=0
+        JUCE_PLUGINHOST_LV2=0
+        JUCE_PLUGINHOST_AU=0)
 endif()

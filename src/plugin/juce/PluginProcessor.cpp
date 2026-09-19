@@ -32,13 +32,19 @@ juce::String SH101AudioProcessor::parameterName(int paramId) {
 juce::AudioProcessorValueTreeState::ParameterLayout SH101AudioProcessor::createParameterLayout() {
     juce::AudioProcessorValueTreeState::ParameterLayout layout;
     // Every SH-101 control is a normalized 0..1 float; Params.h applies the
-    // original taper.  Enumerated controls are shown as 0..1 "switches" with
-    // their positions named, so the host UI stays meaningful.
+    // original taper.  The defaults come from the engine's own default patch
+    // (SH101Params), so a freshly loaded instance is immediately playable and
+    // matches the reference patch used by the tests and the renderer.  Defaulting
+    // every parameter to 0 would load a silent instrument: all four source levels
+    // and the volume are parameters here.
+    const sh101::SH101Params defaultPatch{};
     for (int i = 0; i < sh101::kNumParams; ++i) {
         const juce::String id = parameterId(i);
         const juce::String name = parameterName(i);
+        const auto defaultValue = static_cast<float>(sh101::getNormalized(defaultPatch, i));
         layout.add(std::make_unique<juce::AudioParameterFloat>(
-            juce::ParameterID{ id, 1 }, name, juce::NormalisableRange<float>(0.0f, 1.0f), 0.0f));
+            juce::ParameterID{ id, 1 }, name, juce::NormalisableRange<float>(0.0f, 1.0f),
+            defaultValue));
     }
     return layout;
 }

@@ -1,72 +1,107 @@
-# VST3 wrapper status and build steps
+# VST3 plugin: build, install and verification
 
-## Status: written, but not compiled in this environment
+## Status: built, installed and verified
 
-The brief's first-coding-task order ends with "9. VST3 wrapper". The wrapper
-exists in `src/plugin/juce/`:
+`C:\Users\bbhal\VST3\SH-101.vst3` — built with MSVC (Build Tools 14.44.35207 +
+Windows SDK 10.0.26100), JUCE 8.0.15.
 
-| File | Purpose |
-| --- | --- |
-| `PluginProcessor.h/.cpp` | `juce::AudioProcessor`; owns a `sh101::SH101HostAdapter`, exposes all 34 SH-101 controls as normalized `AudioParameterFloat`s, handles state save/load and MIDI |
-| `PluginEditor.h/.cpp` | Minimal editor: one labelled control per parameter, grouped like the front panel. No branding, no extra features |
-| `CMakeLists.txt` | `juce_add_plugin` target (VST3 + Standalone) |
+The plugin is verified by `tools/vst3_host_test.cpp`, which loads the installed
+bundle through **JUCE's own plugin-hosting classes** (the same path a host
+application uses) and checks the things a host needs:
 
-**It has not been compiled or run.** The development machine has Visual Studio
-2022 installed *without* the "Desktop development with C++" workload (no
-`VC/Tools/MSVC`, no Windows SDK) and no JUCE checkout, and no admin rights to
-install either. Everything the wrapper depends on *is* compiled and tested:
+```
+plugins found: 1
+  name='SH-101' manufacturer='SH101 Emulation Project' instrument=1 inputs=0 outputs=0
+instantiated: 'SH-101' hasEditor=1
+SH-101 parameters reported: 34 of 2115 total (the rest are host-side MIDI CC automation entries)
+output channels: 2
+peak: silence=0.000052 note=0.521147 tail=0.194319
+editor: 600x700 (wrapper contains 0 juce children)
+RESULT: plugin loads, accepts MIDI, produces audio and creates its editor
+```
 
-* the complete DSP voice (`src/sh101/`), validated by 57 test cases, and
-* the host-facing layer the wrapper is a thin shell over
-  (`src/plugin/SH101HostAdapter.*`), covered by `tests/test_host_adapter.cpp`
-  (MIDI note on/off, velocity-0 note off, sustain pedal, All Notes Off, pitch
-  bend range, normalized automation, host-clock sync, multi-channel rendering,
-  note events inside one host block).
+Run it yourself:
 
-Treat the JUCE files as unverified code until a build succeeds.
+```bash
+./build-plugin-msvc/sh101_host_test_artefacts/Release/sh101_host_test.exe "C:/Users/bbhal/VST3/SH-101.vst3"
+```
 
-## Building it (once a toolchain is present)
+The bundle itself is checked by `tools/verify_vst3.bat`: correct VST3 layout
+(`Contents/x86_64-win/SH-101.vst3`), `Contents/Resources/moduleinfo.json`
+declaring an Instrument/Synth class, and the DLL exporting the `GetPluginFactory`
+entry point.
 
-1. Install a C++ toolchain: Visual Studio 2022 Build Tools with
-   *Desktop development with C++* (or LLVM/clang + the Windows SDK).
-2. Get JUCE (7.0.9 or newer):
+## Using it in Ableton Live
 
-   ```
-   git clone --depth 1 --branch 7.0.12 https://github.com/juce-framework/JUCE.git C:/JUCE
-   ```
+`C:\Program Files\Common Files\VST3` (Live's default VST3 system folder) is not
+writable without admin — verified — so the plugin lives in a user folder and Live
+is pointed at it:
 
-   Note: JUCE for VST3 on Windows wants a normal MSVC/Windows-SDK toolchain.
-   The zig/libc++ setup used for the DSP build here is not a supported JUCE
-   configuration.
-3. Configure and build:
+1. Live → **Settings → Plug-Ins**
+2. Enable **Use VST3 Plug-In Custom Folder**
+3. Browse to `C:\Users\bbhal\VST3`
+4. Press **Rescan Plug-Ins** (with "Use VST3 Plug-In System Folder" left on as
+   well; the custom folder must contain only VST3s, which is why it is dedicated)
 
-   ```
-   cmake -S . -B build-plugin -G "Visual Studio 17 2022" -A x64 \
-         -DSH101_BUILD_VST3=ON -DJUCE_DIR=C:/JUCE
-   cmake --build build-plugin --config Release
-   ```
+The plugin then appears in Live's browser as **SH-101** under VST3.
 
-   The VST3 ends up under `build-plugin/src/plugin/juce/SH101Plugin_artefacts/Release/VST3/`.
+Alternative: copy `C:\Users\bbhal\VST3\SH-101.vst3` into
+`C:\Program Files\Common Files\VST3` from an elevated Explorer window and leave
+the custom folder off.
 
-## What the wrapper does per block
+### What you get, and what you don't (yet)
 
-1. Reads all 34 parameters (one `setParametersNormalized()` call, one parameter
-   commit — not 34).
-2. Feeds MIDI messages to the adapter in order, *before* rendering. This matters:
-   the engine consumes ordered gate transitions, so a note that starts and ends
-   inside one host block is still played and released. A state-only gate
-   interface fails this case (it was a real bug — see
-   `tests/test_host_adapter.cpp::adapter_note_inside_one_block_is_released`).
-3. Renders mono into channel 0 and copies it to the remaining channels, so the
-   plugin cannot alter the default SH-101 sound with stereo processing.
-
-## Known gaps to close during the first plugin build
-
-* `PluginEditor.cpp` is layout-only and has never been seen by a compiler.
+* 34 automatable parameters with the original SH-101 ranges and tapers
+  (`src/sh101/Params.h`), defaulting to the engine's reference patch.
+* A real editor window (600x700): one labelled rotary per parameter, grouped like
+  the front panel (LFO, VCO, source mixer, VCF, ENV, VCA/performance,
+  arpeggiator/sequencer). It has been compiled and instantiated, but never seen
+  by a human — expect layout tweaks to be wanted.
 * Enumerated controls (`vcoRange`, `subMode`, `lfoWave`, `pwmSource`,
   `envTrigger`, `vcaMode`, `portamentoMode`, `arpMode`, `arpOn`, `seqOn`) are
-  exposed as continuous 0..1 floats; a `juce::AudioParameterChoice` wrapper would
-  present them better. The DSP taper is already correct in `Params.h`.
-* Host transport/`AudioPlayHead` tempo is not yet wired to
-  `setArpSyncToHost()`/`hostClockTick()`; the engine side exists and is tested.
-* No preset manager; state save/load is APVTS-based only.
+  continuous 0..1 floats rather than named choices; the DSP taper is correct.
+* Host tempo is not yet wired to the arpeggiator/sequencer (`setArpSyncToHost` /
+  `hostClockTick` exist and are tested; the `AudioPlayHead` side is not connected).
+* No preset manager; state save/load is APVTS-based.
+
+## Rebuilding
+
+```bash
+bash tools/build_vst3_msvc.sh     # configures + builds + installs (VS generator)
+MSYS_NO_PATHCONV=1 cmd /c "C:\Users\bbhal\sh101\tools\build_vst3_msvc.bat"   # vcvars + Ninja
+```
+
+Two build paths exist because CMake's "Visual Studio 17 2022" generator cannot
+use this machine's Build Tools instance (it is not registered in the VS Installer
+database, so CMake reports "the instance is not known to the Visual Studio
+Installer"). The `.bat` loads `vcvars64.bat` and drives Ninja instead — that is
+the one that works here. The `.sh` is kept for machines with a registered VS
+instance.
+
+## Why there is no MinGW build
+
+JUCE cannot be built with MinGW/clang, by design:
+
+1. `juce_core/system/juce_TargetPlatform.h` hard-errors on MinGW.
+2. The same header sets `JUCE_64BIT` only under `_MSC_VER`, so a MinGW build
+   compiles as 32-bit internally and every `pointer_sized_uint` cast fails.
+3. The Windows GUI/graphics code uses SDK enumerators mingw-w64 does not ship
+   (`D2D1_SATURATION_PROP_SATURATION`, `CaretPosition_*`).
+
+A MinGW experiment (zig clang + libc++, with 1 and 2 patched locally in the JUCE
+checkout) got `juceaide` from 24 errors down to 5 before it was stopped as a
+dead end: more layers (Direct2D, UIA, WASAPI) remained, and a MinGW-built VST3
+would link a different C++ runtime than the MSVC-built host anyway.
+`tools/build_vst3.sh` is kept as that experiment; it is not the supported path.
+
+## Toolchain notes for this machine
+
+* Visual Studio 2022 Community is installed **without** the C++ workload, and the
+  VS Installer's `modify` path fails here (exit code 1 right after manifest
+  verification). The working route was the standalone bootstrapper:
+  `vs_BuildTools.exe --passive --wait --add Microsoft.VisualStudio.Workload.VCTools
+  --includeRecommended` (`tools/install_buildtools.ps1`), which installed MSVC and
+  the Windows SDK into `C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools`.
+* JUCE lives at `C:\Users\bbhal\juce-src` (tag 8.0.15, cloned shallow).
+* The uv-installed zig toolchain (`build.sh`) remains what builds and tests the
+  DSP; it needs no MSVC.

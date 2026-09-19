@@ -54,7 +54,7 @@ public:
     void setStateInformation(const void* data, int sizeInBytes) override;
 
     // Exposed for the editor.
-    juce::AudioProcessorValueTreeState& parameters() { return apvts; }
+    juce::AudioProcessorValueTreeState& parameters() { return apvts_; }
     sh101::SH101HostAdapter& adapter() { return adapter_; }
 
     // Parameter identifiers, one per sh101::ParamId, in the same order.

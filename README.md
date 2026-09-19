@@ -6,9 +6,11 @@ brief in [`docs/engineering-brief.md`](docs/engineering-brief.md) (revision
 "SONIC FIDELITY FIRST"; the file's SHA-256 is recorded in that folder's git
 history).
 
-Status: **the DSP voice is complete and validated; the VST3 wrapper is written
-but has never been compiled** (this machine has no MSVC C++ toolchain — see
-[`docs/VST3.md`](docs/VST3.md)).
+Status: **the DSP voice is complete and validated, and the VST3 plugin is built,
+installed and verified** — it scans as an instrument, reports its 34 parameters,
+accepts MIDI and produces audio when loaded through a host
+(`tools/vst3_host_test.cpp`). It is installed at `C:\Users\bbhal\VST3\SH-101.vst3`;
+see [docs/VST3.md](docs/VST3.md) for how to point Ableton Live at it.
 
 ## What exists
 
