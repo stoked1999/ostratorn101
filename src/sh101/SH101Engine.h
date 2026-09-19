@@ -12,6 +12,7 @@
 // audio out.
 #pragma once
 
+#include "sh101/AnalogVariation.h"
 #include "sh101/Arpeggiator.h"
 #include "sh101/Calibration.h"
 #include "sh101/Constants.h"
@@ -61,6 +62,13 @@ public:
     StepSequencer& sequencer() { return seq_; }
     const StepSequencer& sequencer() const { return seq_; }
 
+    // Analog variation (thermal drift, per-note tolerance, RC tolerance, hiss).
+    // On by default: it is part of the instrument's sound.  Tests that measure
+    // the calibrated core turn it off explicitly.
+    void setAnalogVariationEnabled(bool on);
+    bool analogVariationEnabled() const { return cal_.analogVariationEnabled; }
+    const AnalogVariation& analogVariation() const { return variation_; }
+
     // ---- Audio -------------------------------------------------------------
     void renderBlock(float* out, int numSamples);
     float renderSample();
@@ -95,6 +103,9 @@ private:
     void applyParams();
     double processOne();
     void updateHeldNotesForArp();
+    // Starts a note with this key press's tolerance applied: fresh per-note pitch
+    // error and RC tolerance, then the gate into the envelope.
+    void startNote(bool retrigger);
 
     double sr_ = 48000.0;
     int    oversampleFactor_ = 2;
@@ -118,6 +129,7 @@ private:
     Arpeggiator arp_;
     StepSequencer seq_;
     OutputStage out_;
+    AnalogVariation variation_;
 
     // Smoothed control values.
     Smoother smCutoffOct_, smRes_, smPw_, smSaw_, smPulse_, smSub_, smNoise_, smVolume_;

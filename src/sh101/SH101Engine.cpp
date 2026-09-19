@@ -22,6 +22,7 @@ void SH101Engine::prepare(double sampleRate, int oversampleFactor) {
     out_.prepare(sr_, cal_);
     voice_.prepare(sr_);
     porta_.prepare(sr_, cal_);
+    variation_.prepare(sr_, cal_);
 
     for (Smoother* s : { &smCutoffOct_, &smRes_, &smPw_, &smSaw_, &smPulse_, &smSub_, &smNoise_,
                          &smVolume_, &smTune_, &smPitchMod_, &smEnvAmt_, &smModAmt_, &smKeyTrack_,
@@ -49,6 +50,9 @@ void SH101Engine::reset() {
     out_.reset();
     voice_.reset();
     porta_.reset(midiNoteToCV(targetNote_));
+    // The variation stream is seeded from the same seed as the noise/LFO
+    // generators, so a deterministic test mode reproduces the drift as well.
+    variation_.reset(noiseSeed_ ^ 0x2f1c8d3bu);
 
     prevGate_ = false;
     seqGate_ = false;
@@ -86,6 +90,12 @@ void SH101Engine::setCalibration(const Calibration& cal) {
     env_.setCalibration(cal);
     out_.setCalibration(cal);
     porta_.prepare(sr_, cal);
+    variation_.setCalibration(cal);
+}
+
+void SH101Engine::setAnalogVariationEnabled(bool on) {
+    cal_.analogVariationEnabled = on;
+    variation_.setCalibration(cal_);
 }
 
 void SH101Engine::setParams(const SH101Params& p) {
@@ -189,7 +199,22 @@ void SH101Engine::updateHeldNotesForArp() {
     heldDirty_ = false;
 }
 
+// Every note start — keyboard, arpeggiator step or sequencer step — draws this
+// note's analog tolerance: a fixed small pitch error from the keyboard CV path
+// and a small RC variation on the envelope segment times.  Both are deterministic
+// for a given seed, so test renders stay reproducible.
+void SH101Engine::startNote(bool retrigger) {
+    variation_.noteOn();
+    env_.setTimeScale(variation_.envelopeTimeScale());
+    env_.noteOn(retrigger);
+}
+
 double SH101Engine::processOne() {
+    // ==== 0. Analog variation: drift and noise floor, once per sample ========
+    // Per sample (not per block) so the result is independent of the host's
+    // buffer size, which the block-size-independence test asserts.
+    variation_.process();
+
     // ==== 1. Note / gate / trigger state ====================================
     // Note source selection: sequencer, then arpeggiator, then the keyboard.
     bool gateNow = false;
@@ -208,7 +233,7 @@ double SH101Engine::processOne() {
             seqGate_ = ev.gate;
             if (ev.gate) {
                 triggerNow = true;
-                env_.noteOn(pending_.envTrigger == SH101Envelope::GateAndTrig);
+                startNote(pending_.envTrigger == SH101Envelope::GateAndTrig);
             } else {
                 env_.noteOff();
             }
@@ -225,7 +250,7 @@ double SH101Engine::processOne() {
             arpGate_ = ev.gate;
             if (ev.gate) {
                 triggerNow = true;
-                env_.noteOn(pending_.envTrigger == SH101Envelope::GateAndTrig);
+                startNote(pending_.envTrigger == SH101Envelope::GateAndTrig);
             } else {
                 env_.noteOff();
             }
@@ -241,7 +266,7 @@ double SH101Engine::processOne() {
         while (voice_.takeGateEvent(rise)) {
             if (rise) {
                 triggerNow = true;
-                env_.noteOn(pending_.envTrigger == SH101Envelope::GateAndTrig);
+                startNote(pending_.envTrigger == SH101Envelope::GateAndTrig);
             } else {
                 env_.noteOff();
             }
@@ -294,7 +319,10 @@ double SH101Engine::processOne() {
     // ==== 6. Pitch CV -> frequency, then the oscillator =====================
     const double pitchMod = smPitchMod_.process() * maxPitchModOctaves_ * lfoValue_;
     const double bendCV = bendSemitones_ / 12.0;
-    pitchCV_ = cvPortamento + pitchMod + bendCV;
+    // AnalogVariation: thermal drift plus this note's keyboard-CV tolerance, in
+    // cents.  The CV is in octaves, so cents/1200.
+    const double analogPitchCV = variation_.pitchOffsetCents() / 1200.0;
+    pitchCV_ = cvPortamento + pitchMod + bendCV + analogPitchCV;
     vco_.setFineTuneCents(smTune_.process());
     vco_.setPitchCV(pitchCV_);
 
@@ -331,7 +359,8 @@ double SH101Engine::processOne() {
     const double cutoffOctaves = (manualOctaves
                                   + smEnvAmt_.process() * envValue_
                                   + smModAmt_.process() * lfoValue_
-                                  + keyFollow) * cal_.vcfWidth;
+                                  + keyFollow) * cal_.vcfWidth
+                                 + variation_.cutoffOffsetOctaves();   // VCF control-path drift
     vcf_.setCutoffHz(cal_.filterFcMinHz * std::exp2(cutoffOctaves));
     vcf_.setResonance(smRes_.process());
 
@@ -345,7 +374,9 @@ double SH101Engine::processOne() {
 
     // ==== 12. Output stage and final safety gain ============================
     out_.setVolume(smVolume_.process());
-    double y = out_.process(vcaOut);
+    // The output amplifier's own noise floor (AnalogVariation): added after the
+    // VCA, which is where the hiss of the real instrument comes from.
+    double y = out_.process(vcaOut) + variation_.noiseFloor();
 
     // Safety net: a non-finite sample means a state blew up; clear the analog
     // states instead of passing NaN on to the host.  Tests assert this counter

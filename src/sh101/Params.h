@@ -231,7 +231,8 @@ struct ParamChoice {
 };
 
 inline const char* const* kLfoWaveItems(int& n) {
-    static const char* items[] = { "Triangle", "Square", "Random", "Noise" };
+    // Short names: the panel shows these in a switch-sized window.
+    static const char* items[] = { "Tri", "Sqr", "Rnd", "Nse" };
     n = 4;
     return items;
 }
@@ -241,22 +242,22 @@ inline const char* const* kVcoRangeItems(int& n) {
     return items;
 }
 inline const char* const* kSubModeItems(int& n) {
-    static const char* items[] = { "-1 Oct Square", "-2 Oct Square", "-2 Oct Narrow" };
+    static const char* items[] = { "-1 Oct", "-2 Oct", "-2 Oct Narrow" };
     n = 3;
     return items;
 }
 inline const char* const* kPwmSourceItems(int& n) {
-    static const char* items[] = { "ENV", "Manual", "LFO" };
+    static const char* items[] = { "Env", "Manual", "LFO" };
     n = 3;
     return items;
 }
 inline const char* const* kEnvTriggerItems(int& n) {
-    static const char* items[] = { "Gate + Trig", "Gate", "LFO" };
+    static const char* items[] = { "Gate+Trg", "Gate", "LFO" };
     n = 3;
     return items;
 }
 inline const char* const* kVcaModeItems(int& n) {
-    static const char* items[] = { "ENV", "Gate" };
+    static const char* items[] = { "Env", "Gate" };
     n = 2;
     return items;
 }

@@ -46,6 +46,13 @@ public:
     void setRelease(double seconds);
     void setTriggerMode(int mode) { triggerMode_ = clampi(mode, 0, 2); }
 
+    // Per-note RC tolerance (AnalogVariation): multiplies the segment times of
+    // the note in progress.  attackTime()/decayTime()/releaseTime() keep
+    // reporting the *parameterised* times, which is what the documented ranges
+    // and their tests refer to.
+    void setTimeScale(double scale);
+    double timeScale() const { return timeScale_; }
+
     double attackTime() const { return attackTime_; }
     double decayTime() const { return decayTime_; }
     double releaseTime() const { return releaseTime_; }
@@ -74,6 +81,7 @@ private:
     double releaseTime_ = 0.30;
     double sustain_ = 0.7;
     int    triggerMode_ = GateAndTrig;
+    double timeScale_ = 1.0;   // per-note RC tolerance multiplier
 
     double coefA_ = 0.0, coefD_ = 0.0, coefR_ = 0.0;
     double attackTarget_ = 1.30;

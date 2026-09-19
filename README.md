@@ -1,21 +1,24 @@
-# SH-101 emulation — project status and build notes
+# ÖstraTorn101 — analogue mono synthesizer (VST3)
 
 A monophonic software synthesizer that recreates the signal flow and behaviour of
 the 1982 Roland SH-101 from its service documentation, built to the engineering
 brief in [`docs/engineering-brief.md`](docs/engineering-brief.md) (revision
-"SONIC FIDELITY FIRST"; the file's SHA-256 is recorded in that folder's git
-history).
+"SONIC FIDELITY FIRST").  The panel credits the instrument it is inspired by and
+reproduces no manufacturer branding.
 
-Status: **the DSP voice is complete and validated, and the VST3 plugin is built,
-installed and verified** — it scans as an instrument, reports its 34 parameters
-(10 of them named switch positions rather than anonymous numbers), accepts MIDI,
-produces audio, and opens a panel UI with engineering-unit read-outs. The preset
-bank (21 patches) is exposed both in the panel and as the plugin's host programs.
+Status: **complete, built, installed and verified.**
 
-Installed at `C:\Program Files\Common Files\VST3\SH-101.vst3` (Live's default
-VST3 folder), with copies at `C:\Program Files (x86)\Common Files\VST3\SH-101.vst3`
-and `C:\Users\bbhal\VST3\SH-101.vst3`. See [docs/VST3.md](docs/VST3.md) for the
-build steps, the install scripts and how Live finds it.
+* The DSP voice is validated by the engine test suite: **78 cases / 3518 checks**,
+  plus a preset-bank suite and a preset-file suite.
+* The VST3 is built with MSVC + JUCE 8.0.15, installed in Live's default VST3
+  folder, and verified through JUCE's own hosting classes
+  (`tools/vst3_host_test.cpp`): it scans as an instrument, reports its 34
+  parameters, accepts MIDI, produces audio and creates its editor.
+* The panel is verified by `tools/editor_test.cpp`, which builds the plugin's own
+  editor, snapshots it to `renders/plugin_ui.png` and checks that it lays its
+  controls out, paints, and round-trips a user preset through the library.
+* 43 factory presets, exposed both in the panel and as the plugin's host programs,
+  and a user preset library that saves patches as files.
 
 ## What exists
 
@@ -35,91 +38,71 @@ src/sh101/          the voice — one class per block, named after the brief's o
   StepSequencer        100 steps, rests, ties, transpose, internal or host clock
   OutputStage         output amplifier: DC block, level, soft limiting
   SH101Engine         the whole voice, in the brief's documented processing order
+  AnalogVariation     thermal drift, per-note tolerance, RC tolerance, output hiss
   Oversampler         2x/4x interpolation and decimation around the nonlinear path
   Calibration         software equivalents of the service-manual trimmers
   Params              normalized 0..1 parameters with the original tapers
+  Presets             43-patch factory bank (data + sequencer patterns)
+  PresetIO            the preset file format (save / load, no framework needed)
 
 src/plugin/         host-facing layer
   SH101HostAdapter    MIDI, automation, sustain pedal, panic, block rendering
-  juce/               VST3/Standalone shell: processor, editor, panel look-and-feel
-src/sh101/Presets.h   21-patch preset bank (data + sequencer patterns)
-tests/              64 test cases / 1612 checks — the acceptance evidence
+  juce/               VST3/Standalone shell: processor, panel editor, look-and-feel
+
+tests/              78 test cases / 3518 checks — the acceptance evidence
 tools/              render_cli (WAV, incl. --preset), bench_cli (CPU), alias_probe,
-                    adapter_probe, editor_test (panel + preset smoke test),
-                    verify_renders.py, check_no_alloc.py
+                    adapter_probe, editor_test (panel + preset library smoke test),
+                    vst3_host_test, verify_renders.py, check_no_alloc.py
 docs/               engineering brief, validation report, approximation register
-renders/            WAV renders of eight demo patches + renders/presets/ (21 patches)
+renders/            WAV renders of eight demo patches + renders/presets/ (43 patches)
                     + renders/plugin_ui.png (the panel, drawn by the editor test)
 ```
 
+## The panel
+
+The instrument is drawn as hardware: a brushed-aluminium body with recessed
+section panels, chunky faders with amber caps, drop-downs showing real switch
+positions, indicator LEDs, panel screws, a nameplate and a level meter.
+
+```
+row 1:  LFO · VCO · SOURCE MIXER · VCF · VCA · ENV
+row 2:  ARPEGGIATOR · SEQUENCER · PERFORMANCE ·  nameplate and level meter
+```
+
+Every fader shows the value it currently holds in engineering units (Hz, ms, %,
+oct, ct) computed through the same taper the engine uses, so the panel reads like
+the instrument.  Double-clicking a fader returns it to the reference patch.
+
+## Presets
+
+`PRESET` row: the display doubles as the selector, `<` and `>` step through the
+whole library, and **SAVE / LOAD / MENU** manage the user library.
+
+* **Factory bank** — 43 patches in eight categories (Bass, Lead, Pad, Pluck,
+  Perc, FX, Arp, Seq), also exposed as the plugin's host programs, so a host's own
+  preset menu lists them too.  Sequenced patches carry their pattern with them.
+* **User presets** — one text file per preset under
+  `%APPDATA%\ÖstraTorn101\Presets\*.otp101`, saved and loaded from the panel.
+  The format is human-readable, keyed by parameter name, and forward compatible
+  (unknown keys are ignored, missing keys fall back to the reference patch).
+
 ## Build and run
 
-The development machine has no MSVC C++ toolchain (Visual Studio 2022 is present
-without the C++ workload), so the build uses zig's bundled clang + libc++, which
-needs no admin rights and no installation:
-
 ```bash
-uv tool install ziglang cmake ninja     # one-off, user-local
-export PATH="$HOME/.local/bin:$PATH"
-bash build.sh                           # builds tests + render + bench + alias probe
-./build/sh101_tests.exe                 # the validation suite (exit 0 = pass)
-./build/sh101_render.exe --list         # demo patches
-./build/sh101_render.exe --patch bass --os 2 renders/bass.wav
-python tools/verify_renders.py          # checks the rendered WAVs independently
-./build/sh101_bench.exe 5               # CPU cost vs real time
-python tools/check_no_alloc.py          # static: no allocation in the audio path
+# The DSP engine, its tests and the headless renderer (needs only the zig toolchain)
+bash build.sh && ./build/sh101_tests.exe
+./build/sh101_render.exe --list-presets
+./build/sh101_render.exe --preset "Acid Bass" renders/acid.wav
+
+# The plugin (needs MSVC + a JUCE checkout; see docs/VST3.md)
+MSYS_NO_PATHCONV=1 cmd /c "C:\Users\bbhal\sh101\tools\build_vst3_msvc.bat"
+powershell -NoProfile -ExecutionPolicy Bypass -File tools/install_vst3_all.ps1
 ```
-
-`CMakeLists.txt` is the canonical build for machines with a normal compiler and
-is what the JUCE/VST3 target uses:
-
-```bash
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build && ctest --test-dir build
-```
-
-## Verification summary
-
-* 57 test cases, 413 checks, 0 failures (`build/test_output.txt`).
-* Oscillator: pitch accurate to < 0.01% over MIDI 24–108, ranges exactly
-  halve/double, ±50 cent tune, pulse width tracked to ±1% duty.
-* Sub oscillator: exactly f/2 or f/4, every transition on a VCO cycle boundary,
-  deterministic flip-flop reset.
-* Filter: −12.0 dB at the corner and −49.4 dB two octaves up (four poles),
-  self-oscillation lands within 1.2% of the commanded cutoff at
-  100/400/1200/4000 Hz, tracks the keyboard at 1 V/oct with full key follow,
-  stable at maximum resonance with and without oversampling.
-* Envelope: every documented time (1.5 ms … 4 s attack, 2 ms … 10 s
-  decay/release) measured within 1% of its setting, with the analog convex
-  attack (0.676 at half the attack time, not 0.5) and exponential discharge.
-* LFO: 0.1 / 1 / 5 / 30 Hz measured to within 0.01%; stepped random and
-  continuous noise are distinct behaviours.
-* Mixer/VCA: gain structure exact, drive stage compresses and bounds, VCA control
-  law linear in the envelope with a modelled OTA compression.
-* Host layer: MIDI note on/off (including velocity 0), sustain pedal, All Notes
-  Off, ±2 semitone bend, normalized automation round-trip, host-clock sync,
-  mono-consistent multi-channel output, and note events inside one block.
-* Engine: bit-identical renders for identical seeds, silence without a gate,
-  finite and bounded output with everything at maximum at 44.1/48/88.2/96 kHz and
-  1x/2x/4x oversampling, block-size independence, **0 bytes allocated during 32
-  render blocks**, no safety reset ever triggered.
-* CPU: 19.7–108x real time (0.9–5.5% of one core) depending on rate and
-  oversampling, measured by `tools/bench_cli.cpp`.
-
-Details, per-test numbers and the outstanding hardware comparisons:
-[`docs/VALIDATION.md`](docs/VALIDATION.md).
 
 ## Fidelity milestones
 
 | Milestone | State |
 | --- | --- |
-| 1 — functional clone (mono voice, band-limited VCO, sub divisions, ADSR/LFO/portamento, 4-pole resonant filter, VCA) | **done and tested** (VST3 build outstanding) |
-| 2 — circuit-informed model (CEM3340 waveform levels, mixer gain staging, IR3109 OTA stage model and SH-101 feedback, BA662 VCA nonlinearity, analog envelope curves, control tapers) | topology, curves and tapers are in place; **the coefficients that need measured hardware are not fitted yet** — see the approximation register |
+| 1 — topology-faithful model (signal path, oscillator types, four-pole filter, envelope, modulation) | **done**: see `docs/VALIDATION.md` for the measured numbers |
+| 2 — circuit-informed model (CEM3340 waveform levels, mixer gain staging, IR3109 OTA model, BA662 VCA nonlinearity, analog envelope curves, control tapers, analog variation) | topology, curves, tapers and tolerance figures are in place; **the coefficients that need measured hardware are not fitted yet** — see the approximation register |
 | 3 — measured calibration (fit constants to recordings of a real unit) | **not started**: requires an SH-101 or a measurement set. `Calibration.h` exposes exactly the trimmers to fit, and `tools/` provides the measurement harnesses |
-
-## Deliberate non-goals
-
-Per the brief: no branding/trademark use, no polyphony, no unison, no effects, no
-stereo widening, no extra oscillators or filter modes, no CPU instruction-set
-emulation. Anything modern (MIDI, automation, sustain pedal, host clock) is a
-transport/control layer that leaves the default voice untouched.

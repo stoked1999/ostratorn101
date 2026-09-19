@@ -1,17 +1,15 @@
-// JUCE editor for the SH-101 model.
+// ÖstraTorn101 — panel editor.
 //
-// Layout policy: the panel is the instrument's own vocabulary — the sections are
-// the synth's functional blocks in signal order (LFO, VCO, source mixer,
-// filter, envelope, VCA/performance, arpeggiator/sequencer), each control on a
-// fader slot with the value it currently holds underneath it.  Switch-like
-// controls are drop-downs showing the real position names.
+// The panel is laid out like hardware: a title bar with the instrument's name and
+// the power switch, a preset row with the display and the library buttons, then
+// two rows of sections in signal order —
 //
-// Values are shown in engineering units (Hz, ms, %, octaves) computed through
-// the same taper the engine uses, not as raw 0..1 numbers.
+//   row 1:  LFO · VCO · SOURCE MIXER · VCF · VCA · ENV
+//   row 2:  ARPEGGIATOR · SEQUENCER · PERFORMANCE ·  nameplate and level meter
 //
-// The preset selector drives the shared preset bank (src/sh101/Presets.h), which
-// is also the plugin's program list, so the host's own preset menu and this
-// panel stay in step.
+// Each control is a fader with an amber cap and the value it currently holds
+// underneath, in engineering units (Hz, ms, %, oct, ct); switch-like controls are
+// drop-downs showing the real position names.
 #pragma once
 
 #include <juce_audio_processors/juce_audio_processors.h>
@@ -20,14 +18,22 @@
 #include <memory>
 #include <vector>
 
+#include "OstraTornLookAndFeel.h"
 #include "PluginProcessor.h"
-#include "SH101LookAndFeel.h"
 
-class SH101AudioProcessorEditor : public juce::AudioProcessorEditor,
-                                 private juce::Timer {
+// The panel's power switch: a rocker that mutes the output (standby).
+class RockerSwitch : public juce::Button {
 public:
-    explicit SH101AudioProcessorEditor(SH101AudioProcessor& processor);
-    ~SH101AudioProcessorEditor() override;
+    explicit RockerSwitch(const juce::String& name);
+    void paintButton(juce::Graphics& g, bool shouldDrawButtonAsHighlighted,
+                     bool shouldDrawButtonAsDown) override;
+};
+
+class OstraTornAudioProcessorEditor : public juce::AudioProcessorEditor,
+                                      private juce::Timer {
+public:
+    explicit OstraTornAudioProcessorEditor(OstraTornAudioProcessor& processor);
+    ~OstraTornAudioProcessorEditor() override;
 
     void paint(juce::Graphics& g) override;
     void resized() override;
@@ -44,22 +50,42 @@ private:
     };
 
     struct Panel {
-        int column = 0;             // 0 = left, 1 = right
+        int row = 0;                 // 0 = upper row, 1 = lower row
+        int contentWidth = 0;        // sum of its controls' widths, in pixels
         juce::String title;
         int firstControl = 0;
         int numControls = 0;
         juce::Rectangle<int> bounds;
     };
 
-    void addPanel(int column, const juce::String& title, const std::vector<int>& paramIds);
-    void layoutPanel(Panel& panel, juce::Rectangle<int> bounds);
-    void loadPresetFromUi(int index);
-    void stepPreset(int delta);
+    void addPanel(int row, const juce::String& title, const std::vector<int>& paramIds);
+    void layoutPanel(Panel& panel, juce::Rectangle<int> bounds, float widthScale);
+    void layoutRow(int row, juce::Rectangle<int> area, int rightHandBlockWidth);
+
+    void refreshPresetList();
     void refreshPresetDisplay();
+    void loadPresetFromUi(int combinedIndex);
+    void stepPreset(int delta);
+    int combinedPresetCount() const;
+    void showPresetMenu();
+    void savePresetFromUi();
+    void loadPresetFromFileUi();
+    void deleteUserPresetUi(const juce::String& name);
     void timerCallback() override;
 
-    SH101AudioProcessor& processor_;
-    SH101LookAndFeel lookAndFeel_;
+    void paintTitleBar(juce::Graphics& g);
+    void paintLevelMeter(juce::Graphics& g, juce::Rectangle<int> bounds);
+
+    // The right-hand block of the lower row holds the nameplate and the meter;
+    // both the painting and the label layout ask for these, so they cannot drift
+    // apart.
+    juce::Rectangle<int> lowerRightBlockBounds() const;
+    juce::Rectangle<int> nameplateBounds() const;
+    juce::Rectangle<int> levelMeterBounds() const;
+    void updatePresetDescription();
+
+    OstraTornAudioProcessor& processor_;
+    OstraTornLookAndFeel lookAndFeel_;
 
     std::vector<Control> controls_;
     std::vector<Panel> panels_;
@@ -67,11 +93,27 @@ private:
     juce::Label titleLabel_;
     juce::Label subtitleLabel_;
     juce::Label presetCaptionLabel_;
-    juce::Label presetDescriptionLabel_;
+    juce::Label descriptionLabel_;
+    juce::Label nameplateTitle_;
+    juce::Label nameplateSubtitle_;
+    juce::Label inspiredLabel_;
+
     juce::ComboBox presetBox_;
     juce::TextButton previousButton_{ "<" };
     juce::TextButton nextButton_{ ">" };
+    juce::TextButton saveButton_{ "SAVE" };
+    juce::TextButton loadButton_{ "LOAD" };
+    juce::TextButton menuButton_{ "MENU" };
+    RockerSwitch powerButton_{ "POWER" };
     juce::TooltipWindow tooltipWindow_{ this, 600 };
+    std::unique_ptr<juce::FileChooser> fileChooser_;
 
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(SH101AudioProcessorEditor)
+    // Level meter: the processor reports each block's peak, the panel smooths it
+    // with a decay so the ladder reads like a real meter.
+    float meterLevel_ = 0.0f;
+
+    // Snapshot of the preset list, so the combo and the menu agree.
+    juce::StringArray userPresets_;
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(OstraTornAudioProcessorEditor)
 };

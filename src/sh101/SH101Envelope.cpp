@@ -23,6 +23,16 @@ void SH101Envelope::setDecay(double seconds)  { decayTime_ = clampd(seconds, 0.0
 void SH101Envelope::setRelease(double seconds){ releaseTime_ = clampd(seconds, 0.0005, 60.0); updateCoefficients(); }
 void SH101Envelope::setSustain(double level01) { sustain_ = clampd(level01, 0.0, 1.0); }
 
+void SH101Envelope::setTimeScale(double scale) {
+    // Clamped to a sane band: a per-note RC tolerance is a few percent, never a
+    // different envelope.
+    const double clamped = clampd(scale, 0.90, 1.10);
+    if (clamped != timeScale_) {
+        timeScale_ = clamped;
+        updateCoefficients();
+    }
+}
+
 void SH101Envelope::updateCoefficients() {
     // Attack charges towards a target above the threshold, and the time constant
     // is chosen so the curve reaches 1.0 in exactly the parameterised time:
@@ -30,9 +40,9 @@ void SH101Envelope::updateCoefficients() {
     const double vt = (attackTarget_ > 1.000001) ? attackTarget_ : 1.000001;
     const double attackDivisor = std::log(vt / (vt - 1.0));
     const double settle = (cal_.envSettleRatio > 0.0) ? cal_.envSettleRatio : 4.605170186;
-    coefA_ = segmentCoefficient(attackTime_, attackDivisor);
-    coefD_ = segmentCoefficient(decayTime_, settle);
-    coefR_ = segmentCoefficient(releaseTime_, settle);
+    coefA_ = segmentCoefficient(attackTime_ * timeScale_, attackDivisor);
+    coefD_ = segmentCoefficient(decayTime_ * timeScale_, settle);
+    coefR_ = segmentCoefficient(releaseTime_ * timeScale_, settle);
 }
 
 // Segment coefficient for a parameter time that means "the segment covers its

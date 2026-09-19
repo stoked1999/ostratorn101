@@ -1,4 +1,4 @@
-// JUCE VST3/Standalone wrapper: implementation.
+// ÖstraTorn101 — VST3/Standalone wrapper: implementation.
 #include "PluginProcessor.h"
 
 #include <cmath>
@@ -8,13 +8,27 @@
 #include "sh101/Presets.h"
 
 namespace {
+
+// The product name is not ASCII.  juce::String(const char*) interprets its input
+// as Latin-1, so the UTF-8 bytes are decoded explicitly — otherwise the panel (and
+// the name a host shows) reads "Ã–straTorn101".  JucePlugin_DisplayName is built as
+// a C escape sequence so the bytes survive the compiler command line.
+juce::String projectName() { return juce::String::fromUTF8(JucePlugin_DisplayName); }
+
+const char* const kPresetExtension = ".otp101";
+
 // A short, stable identifier per parameter (hosts persist these).
 juce::String idForParam(int paramId) {
     return juce::String("p") + juce::String(paramId) + "_" + sh101::paramName(paramId);
 }
+
+juce::String fromUtf8(const std::string& text) {
+    return juce::String::fromUTF8(text.c_str(), static_cast<int>(text.size()));
+}
+
 } // namespace
 
-const std::vector<juce::String>& SH101AudioProcessor::parameterIds() {
+const std::vector<juce::String>& OstraTornAudioProcessor::parameterIds() {
     static const std::vector<juce::String> ids = [] {
         std::vector<juce::String> v;
         for (int i = 0; i < sh101::kNumParams; ++i) v.push_back(idForParam(i));
@@ -23,24 +37,22 @@ const std::vector<juce::String>& SH101AudioProcessor::parameterIds() {
     return ids;
 }
 
-juce::String SH101AudioProcessor::parameterId(int paramId) {
+juce::String OstraTornAudioProcessor::parameterId(int paramId) {
     const auto& ids = parameterIds();
     return ids[static_cast<size_t>(juce::jlimit(0, sh101::kNumParams - 1, paramId))];
 }
 
-juce::String SH101AudioProcessor::parameterName(int paramId) {
+juce::String OstraTornAudioProcessor::parameterName(int paramId) {
     return juce::String(sh101::paramName(paramId));
 }
 
-juce::AudioProcessorValueTreeState::ParameterLayout SH101AudioProcessor::createParameterLayout() {
+juce::AudioProcessorValueTreeState::ParameterLayout
+OstraTornAudioProcessor::createParameterLayout() {
     juce::AudioProcessorValueTreeState::ParameterLayout layout;
     // Every control is exposed at its normalized position: continuous controls as
     // 0..1 floats, switch-like controls as choices with their real position
-    // names.  The defaults come from the engine's own default patch
-    // (SH101Params), so a freshly loaded instance is immediately playable and
-    // matches the reference patch used by the tests and the renderer.  Defaulting
-    // every parameter to 0 would load a silent instrument: all four source levels
-    // and the volume are parameters here.
+    // names.  Defaults come from the engine's reference patch, so a freshly
+    // loaded instance is immediately playable.
     const sh101::SH101Params defaultPatch{};
     for (int i = 0; i < sh101::kNumParams; ++i) {
         const juce::String id = parameterId(i);
@@ -65,41 +77,49 @@ juce::AudioProcessorValueTreeState::ParameterLayout SH101AudioProcessor::createP
     return layout;
 }
 
-SH101AudioProcessor::SH101AudioProcessor()
+OstraTornAudioProcessor::OstraTornAudioProcessor()
     : juce::AudioProcessor(BusesProperties().withOutput("Output", juce::AudioChannelSet::stereo(),
                                                        true)),
-      apvts_(*this, nullptr, "SH101", createParameterLayout()) {
+      apvts_(*this, nullptr, "OstraTorn101", createParameterLayout()) {
     for (int i = 0; i < sh101::kNumParams; ++i) {
-        parameterPointers_[static_cast<size_t>(i)] =
-            apvts_.getRawParameterValue(parameterId(i));
+        parameterPointers_[static_cast<size_t>(i)] = apvts_.getRawParameterValue(parameterId(i));
+
+        int itemCount = 0;
+        const bool choice = sh101::paramChoiceItems(i, itemCount) != nullptr && itemCount > 1;
+        rawToNormalized_[static_cast<size_t>(i)] =
+            choice ? (1.0f / static_cast<float>(itemCount - 1)) : 1.0f;
     }
-    // Start on the bank's reference patch, matching the parameter defaults.
-    loadPreset(0);
+    loadPreset(0);   // the bank's reference patch, matching the parameter defaults
+
     float values[sh101::kNumParams] = {};
-    for (int i = 0; i < sh101::kNumParams; ++i) {
-        values[i] = parameterPointers_[static_cast<size_t>(i)]->load();
-    }
+    readParameterSnapshot(values);
     adapter_.setParametersNormalized(values, sh101::kNumParams);
     adapter_.commitParameters();
 }
 
-void SH101AudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlock) {
-    adapter_.prepare(sampleRate, samplesPerBlock, 2);   // 2x oversampled filter path
-    // Push the current automation into the freshly prepared engine.
-    float values[sh101::kNumParams] = {};
+// Reads every parameter at once, converted to the normalized form the engine's
+// taper expects.  Used by both the audio callback and the message thread.
+void OstraTornAudioProcessor::readParameterSnapshot(float* destination) const {
     for (int i = 0; i < sh101::kNumParams; ++i) {
-        values[i] = parameterPointers_[static_cast<size_t>(i)]->load();
+        destination[i] = parameterPointers_[static_cast<size_t>(i)]->load()
+                         * rawToNormalized_[static_cast<size_t>(i)];
     }
+}
+
+void OstraTornAudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlock) {
+    adapter_.prepare(sampleRate, samplesPerBlock, 2);   // 2x oversampled filter path
+    float values[sh101::kNumParams] = {};
+    readParameterSnapshot(values);
     adapter_.setParametersNormalized(values, sh101::kNumParams);
 }
 
-void SH101AudioProcessor::releaseResources() {
+void OstraTornAudioProcessor::releaseResources() {
     adapter_.reset();
 }
 
-bool SH101AudioProcessor::isBusesLayoutSupported(const BusesLayout& layouts) const {
-    // Mono or stereo out, no inputs: the SH-101 is a monophonic instrument and
-    // the model does not synthesise a stereo image.
+bool OstraTornAudioProcessor::isBusesLayoutSupported(const BusesLayout& layouts) const {
+    // Mono or stereo out, no inputs: the instrument is monophonic and the model
+    // does not synthesise a stereo image.
     const auto& out = layouts.getMainOutputChannelSet();
     if (out != juce::AudioChannelSet::mono() && out != juce::AudioChannelSet::stereo()) {
         return false;
@@ -107,33 +127,44 @@ bool SH101AudioProcessor::isBusesLayoutSupported(const BusesLayout& layouts) con
     return layouts.getMainInputChannelSet() == juce::AudioChannelSet::disabled();
 }
 
-// Applied on the audio thread: the sequence memory has exactly one writer.
-void SH101AudioProcessor::applyPendingPattern() {
-    const int pending = pendingPatternIndex_.exchange(0, std::memory_order_acq_rel);
-    if (pending <= 0) return;
-    const sh101::PresetInfo& info = sh101::preset(pending - 1);
-    if (info.applySequence != nullptr) {
-        info.applySequence(adapter_.engine().sequencer());
-    }
+// ---- Sequencer pattern hand-over -------------------------------------------
+void OstraTornAudioProcessor::queuePattern(const sh101::PresetDocument& doc) {
+    if (doc.stepCount <= 0) return;
+    const juce::SpinLock::ScopedLockType lock(patternLock_);
+    pendingPattern_ = doc;
+    pendingPatternReady_.store(true, std::memory_order_release);
 }
 
-void SH101AudioProcessor::processBlock(juce::AudioBuffer<float>& buffer,
-                                      juce::MidiBuffer& midi) {
+void OstraTornAudioProcessor::applyPendingPattern() {
+    if (! pendingPatternReady_.load(std::memory_order_acquire)) return;
+    // tryEnter only: an audio callback must never wait for the UI.
+    const juce::SpinLock::ScopedTryLockType lock(patternLock_);
+    if (! lock.isLocked()) return;
+
+    auto& sequencer = adapter_.engine().sequencer();
+    sequencer.setLength(pendingPattern_.stepCount);
+    for (int i = 0; i < pendingPattern_.stepCount; ++i) {
+        const auto& step = pendingPattern_.steps[i];
+        sequencer.setStep(i, step.note, step.gate, step.tie);
+    }
+    pendingPatternReady_.store(false, std::memory_order_release);
+}
+
+void OstraTornAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer,
+                                          juce::MidiBuffer& midi) {
     juce::ScopedNoDenormals noDenormals;
     const int numSamples = buffer.getNumSamples();
 
-    // 0. A preset loaded since the last block may carry a sequence pattern.
     applyPendingPattern();
 
-    // 1. Automation: one parameter commit per block.
+    // Automation: one parameter commit per block, converted to the normalized
+    // values the engine's taper expects.
     float values[sh101::kNumParams] = {};
-    for (int i = 0; i < sh101::kNumParams; ++i) {
-        values[i] = parameterPointers_[static_cast<size_t>(i)]->load();
-    }
+    readParameterSnapshot(values);
     adapter_.setParametersNormalized(values, sh101::kNumParams);
 
-    // 2. MIDI, in order, before rendering (an event inside the block must not be
-    //    lost — the adapter and engine handle events, not just state).
+    // MIDI, in order, before rendering (an event inside the block must not be
+    // lost — the adapter and engine handle events, not just state).
     for (const auto metadata : midi) {
         const auto message = metadata.getMessage();
         const int size = message.getRawDataSize();
@@ -146,76 +177,246 @@ void SH101AudioProcessor::processBlock(juce::AudioBuffer<float>& buffer,
     }
     midi.clear();
 
-    // 3. Audio: render mono and copy to every output channel.
+    // Audio: render mono and copy to every output channel.
     float* const* channels = buffer.getArrayOfWritePointers();
     adapter_.renderBlock(channels, buffer.getNumChannels(), numSamples);
+
+    float peak = 0.0f;
+    for (int channel = 0; channel < buffer.getNumChannels(); ++channel) {
+        peak = juce::jmax(peak, buffer.getMagnitude(channel, 0, numSamples));
+    }
+
+    if (standby_.load(std::memory_order_relaxed)) {
+        // Standby: silence the output but keep the voice running, so leaving
+        // standby does not restart the instrument mid-note.
+        buffer.clear();
+        peak = 0.0f;
+    }
+    outputLevel_.store(peak, std::memory_order_relaxed);
 }
 
-// ---- Presets / programs ----------------------------------------------------
-int SH101AudioProcessor::getNumPrograms() {
+// ---- Presets ---------------------------------------------------------------
+int OstraTornAudioProcessor::getNumPrograms() {
     return sh101::numPresets();
 }
 
-int SH101AudioProcessor::getCurrentProgram() {
+int OstraTornAudioProcessor::getCurrentProgram() {
     return currentPreset_.load(std::memory_order_relaxed);
 }
 
-void SH101AudioProcessor::setCurrentProgram(int index) {
+void OstraTornAudioProcessor::setCurrentProgram(int index) {
     loadPreset(index);
 }
 
-const juce::String SH101AudioProcessor::getProgramName(int index) {
+const juce::String OstraTornAudioProcessor::getProgramName(int index) {
     const sh101::PresetInfo& info = sh101::preset(index);
     return juce::String(info.category) + ": " + info.name;
 }
 
-void SH101AudioProcessor::loadPreset(int index) {
-    const int count = sh101::numPresets();
-    index = juce::jlimit(0, count - 1, index);
-    const sh101::SH101Params params = sh101::makePresetParams(index);
-
+void OstraTornAudioProcessor::applyDocument(const sh101::PresetDocument& doc,
+                                            const juce::String& name, bool isUser) {
     for (int i = 0; i < sh101::kNumParams; ++i) {
         if (auto* param = apvts_.getParameter(parameterId(i))) {
             // Notifying the host keeps the change visible to automation lanes and
             // to the host's own "modified" indicator.
-            param->setValueNotifyingHost(static_cast<float>(sh101::getNormalized(params, i)));
+            param->setValueNotifyingHost(static_cast<float>(sh101::getNormalized(doc.params, i)));
         }
     }
+    queuePattern(doc);
 
-    if (sh101::preset(index).applySequence != nullptr) {
-        pendingPatternIndex_.store(index + 1, std::memory_order_release);
-    }
+    loadedParams_ = doc.params;
+    currentPresetName_ = name;
+    currentPresetIsUser_ = isUser;
+}
+
+void OstraTornAudioProcessor::loadPreset(int index) {
+    const int count = sh101::numPresets();
+    index = juce::jlimit(0, count - 1, index);
+    applyDocument(sh101::documentFromBank(index), juce::String(sh101::preset(index).name), false);
     currentPreset_.store(index, std::memory_order_relaxed);
 }
 
-juce::AudioProcessorEditor* SH101AudioProcessor::createEditor() {
-    return new SH101AudioProcessorEditor(*this);
+juce::File OstraTornAudioProcessor::userPresetDirectory() {
+    return juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory)
+        .getChildFile(projectName())
+        .getChildFile("Presets");
 }
 
-void SH101AudioProcessor::getStateInformation(juce::MemoryBlock& destData) {
+juce::File OstraTornAudioProcessor::userPresetFile(const juce::String& name) const {
+    return userPresetDirectory()
+        .getChildFile(juce::String(sh101::presetFileName(name.toStdString())) + kPresetExtension);
+}
+
+juce::StringArray OstraTornAudioProcessor::userPresetNames() const {
+    juce::StringArray names;
+    for (const auto& entry : juce::RangedDirectoryIterator(userPresetDirectory(), false,
+                                                           juce::String("*") + kPresetExtension,
+                                                           juce::File::findFiles)) {
+        const juce::String baseName = entry.getFile().getFileNameWithoutExtension();
+
+        // Prefer the name stored inside the file: it is what the user typed, and
+        // it survives the file-name sanitising.
+        sh101::PresetDocument doc;
+        const juce::String text = entry.getFile().loadFileAsString();
+        if (sh101::parsePreset(text.toStdString(), doc) && doc.name != "Untitled") {
+            names.add(fromUtf8(doc.name));
+        } else {
+            names.add(baseName);
+        }
+    }
+    names.sort(true);
+    return names;
+}
+
+bool OstraTornAudioProcessor::captureDocument(sh101::PresetDocument& out) const {
+    sh101::PresetDocument doc;
+    doc.name = currentPresetName_.isEmpty() ? "Untitled" : currentPresetName_.toStdString();
+    doc.category = "User";
+    doc.description = "Saved from the panel";
+
+    for (int i = 0; i < sh101::kNumParams; ++i) {
+        const float value = parameterPointers_[static_cast<size_t>(i)]->load()
+                             * rawToNormalized_[static_cast<size_t>(i)];
+        sh101::applyNormalized(doc.params, i, value);
+    }
+
+    // The sequencer memory is not a parameter, so it is captured here; otherwise
+    // a saved preset would lose the pattern it was built around.
+    const auto& sequencer = adapter_.engine().sequencer();
+    sh101::StepSequencer::Step steps[sh101::StepSequencer::kMaxSteps];
+    for (int i = 0; i < sequencer.length(); ++i) steps[i] = sequencer.step(i);
+    doc.setPattern(steps, sequencer.length());
+
+    out = doc;
+    return true;
+}
+
+bool OstraTornAudioProcessor::saveUserPreset(const juce::String& name) {
+    sh101::PresetDocument doc;
+    captureDocument(doc);
+    doc.name = name.toStdString();
+    doc.category = "User";
+    doc.description = "Saved from the panel";
+
+    const juce::File directory = userPresetDirectory();
+    if (! directory.exists() && ! directory.createDirectory().wasOk()) return false;
+
+    return userPresetFile(name).replaceWithText(fromUtf8(sh101::serialisePreset(doc)));
+}
+
+bool OstraTornAudioProcessor::loadUserPresetFile(const juce::File& file) {
+    if (! file.existsAsFile()) return false;
+    sh101::PresetDocument doc;
+    if (! sh101::parsePreset(file.loadFileAsString().toStdString(), doc)) return false;
+
+    applyDocument(doc, fromUtf8(doc.name), true);
+    return true;
+}
+
+bool OstraTornAudioProcessor::loadUserPreset(const juce::String& name) {
+    return loadUserPresetFile(userPresetFile(name));
+}
+
+bool OstraTornAudioProcessor::deleteUserPreset(const juce::String& name) {
+    const juce::File file = userPresetFile(name);
+    return file.existsAsFile() && file.deleteFile();
+}
+
+juce::String OstraTornAudioProcessor::currentPresetName() const {
+    return currentPresetName_;
+}
+
+bool OstraTornAudioProcessor::presetIsModified() const {
+    for (int i = 0; i < sh101::kNumParams; ++i) {
+        // Compare normalized positions: a choice parameter's raw value is an item
+        // index, so comparing it against a normalized target would always differ.
+        const float value = parameterPointers_[static_cast<size_t>(i)]->load()
+                             * rawToNormalized_[static_cast<size_t>(i)];
+        if (std::fabs(value - sh101::getNormalized(loadedParams_, i)) > 1.0e-6) return true;
+    }
+    return false;
+}
+
+void OstraTornAudioProcessor::setStandby(bool on) {
+    standby_.store(on, std::memory_order_relaxed);
+    if (on) outputLevel_.store(0.0f, std::memory_order_relaxed);
+}
+
+// ---- Editor / state --------------------------------------------------------
+juce::AudioProcessorEditor* OstraTornAudioProcessor::createEditor() {
+    return new OstraTornAudioProcessorEditor(*this);
+}
+
+void OstraTornAudioProcessor::getStateInformation(juce::MemoryBlock& destData) {
     auto state = apvts_.copyState();
-    // The active preset is stored alongside the controls so reopening a session
-    // restores the sequence memory for the sequenced presets.
+
+    // Everything the parameters cannot carry: which preset this is, whether it is
+    // a user preset, standby, and the sequencer memory.
     state.setProperty("preset", currentPreset_.load(), nullptr);
-    std::unique_ptr<juce::XmlElement> xml(state.createXml());
-    if (xml != nullptr) copyXmlToBinary(*xml, destData);
+    state.setProperty("presetName", currentPresetName_, nullptr);
+    state.setProperty("presetIsUser", currentPresetIsUser_, nullptr);
+    state.setProperty("standby", isStandby(), nullptr);
+
+    sh101::PresetDocument doc;
+    captureDocument(doc);
+    state.setProperty("seqLength", doc.stepCount, nullptr);
+    for (int i = 0; i < doc.stepCount; ++i) {
+        state.setProperty(juce::Identifier("seq" + juce::String(i)),
+                          juce::String(doc.steps[i].note) + ","
+                              + juce::String(doc.steps[i].gate ? 1 : 0) + ","
+                              + juce::String(doc.steps[i].tie ? 1 : 0),
+                          nullptr);
+    }
+
+    if (auto xml = std::unique_ptr<juce::XmlElement>(state.createXml())) {
+        copyXmlToBinary(*xml, destData);
+    }
 }
 
-void SH101AudioProcessor::setStateInformation(const void* data, int sizeInBytes) {
+void OstraTornAudioProcessor::setStateInformation(const void* data, int sizeInBytes) {
     std::unique_ptr<juce::XmlElement> xml(getXmlFromBinary(data, sizeInBytes));
     if (xml == nullptr) return;
 
     const int presetIndex = xml->getIntAttribute("preset", 0);
-    // replaceState restores the control values; re-queueing the preset's pattern
-    // restores the sequence memory that the parameters cannot carry.
+    const juce::String presetName = xml->getStringAttribute("presetName");
+    const bool isUser = xml->getBoolAttribute("presetIsUser", false);
+
     apvts_.replaceState(juce::ValueTree::fromXml(*xml));
-    if (sh101::preset(presetIndex).applySequence != nullptr) {
-        pendingPatternIndex_.store(presetIndex + 1, std::memory_order_release);
-    }
+
     currentPreset_.store(juce::jlimit(0, sh101::numPresets() - 1, presetIndex),
                          std::memory_order_relaxed);
+    currentPresetName_ = presetName.isEmpty()
+                             ? juce::String(sh101::preset(presetIndex).name)
+                             : presetName;
+    currentPresetIsUser_ = isUser;
+    setStandby(xml->getBoolAttribute("standby", false));
+
+    // Restore the sequence memory the parameters cannot carry.
+    sh101::PresetDocument doc;
+    const int stepCount = juce::jlimit(0, sh101::StepSequencer::kMaxSteps,
+                                       xml->getIntAttribute("seqLength", 0));
+    for (int i = 0; i < stepCount; ++i) {
+        const juce::String value = xml->getStringAttribute(juce::Identifier("seq" + juce::String(i)));
+        int note = 60;
+        int gate = 1;
+        int tie = 0;
+        if (std::sscanf(value.toStdString().c_str(), "%d,%d,%d", &note, &gate, &tie) == 3) {
+            doc.steps[i].note = juce::jlimit(0, 127, note);
+            doc.steps[i].gate = (gate != 0);
+            doc.steps[i].tie = (tie != 0);
+        }
+    }
+    doc.stepCount = stepCount;
+    queuePattern(doc);
+
+    loadedParams_ = sh101::SH101Params{};
+    float snapshot[sh101::kNumParams] = {};
+    readParameterSnapshot(snapshot);
+    for (int i = 0; i < sh101::kNumParams; ++i) {
+        sh101::applyNormalized(loadedParams_, i, snapshot[i]);
+    }
 }
 
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter() {
-    return new SH101AudioProcessor();
+    return new OstraTornAudioProcessor();
 }

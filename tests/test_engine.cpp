@@ -249,6 +249,11 @@ SH101_TEST(engine_block_size_independence) {
 SH101_TEST(engine_pitch_bend_maps_to_semitones) {
     SH101Engine engine;
     engine.prepare(48000.0, 1);
+    // The bend ratio is asserted to 0.1%, which is finer than the analog pitch
+    // tolerance of a real instrument (AnalogVariation: up to ~0.23%).  This test
+    // therefore measures the calibrated core; the tolerance has its own tests in
+    // tests/test_analog.cpp.
+    engine.setAnalogVariationEnabled(false);
     SH101Params p = fullPatch();
     p.sawLevel = 1.0;
     p.pulseLevel = 0.0;

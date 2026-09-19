@@ -31,3 +31,6 @@ Thumbs.db
 desktop.ini
 build-ui.log
 build-plugin-msvc.log
+install-run.log
+install-result.txt
+build-ui.log

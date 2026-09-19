@@ -79,9 +79,19 @@ struct Calibration {
     double envSettleRatio  = 4.605170186; // ln(100)
 
     // ---- Oscillator / CPU ------------------------------------------------
-    // [APPROX] Analog drift is optional and off by default (brief: drift is
-    // not a substitute for correct circuit behaviour).
-    double analogDriftCents = 3.0;
+    // Analog variation is modelled (AnalogVariation.h) rather than faked with
+    // noise: these are the tolerance figures of a *healthy, calibrated* unit.
+    // The brief explicitly warns against "exaggerated random drift or
+    // instability", so each figure is small and bounded, and every one of them
+    // is a milestone-3 fitting target against a measured unit.
+    bool   analogVariationEnabled = true;
+    double driftPitchCents    = 2.5;    // VCO thermal drift, peak deviation
+    double driftPitchHz       = 0.22;   // drift rate (first-order corner)
+    double noteToleranceCents = 1.5;    // per-note keyboard CV / D-A tolerance
+    double driftCutoffOctaves = 0.012;  // ~14 cents of cutoff drift, peak
+    double driftCutoffHz      = 0.15;
+    double envTimeTolerance   = 0.012;  // +/-1.2% segment times, RC tolerance
+    double noiseFloorDbfs     = -88.0;  // output stage idle noise
 };
 
 } // namespace sh101

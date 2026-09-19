@@ -55,7 +55,7 @@ int main(int argc, char** argv) {
     juce::ScopedJuceInitialiser_GUI juceInitialiser;   // message manager for instantiation
 
     if (argc < 2) {
-        std::printf("usage: sh101_host_test <path to SH-101.vst3>\n");
+        std::printf("usage: sh101_host_test <path to ÖstraTorn101.vst3>\n");
         return 2;
     }
     const juce::String pluginPath = juce::String::fromUTF8(argv[1]);
@@ -135,7 +135,7 @@ int main(int argc, char** argv) {
                 }
             }
         }
-        std::printf("SH-101 parameters reported: %d of %d total (the rest are host-side MIDI CC "
+        std::printf("ÖstraTorn101 parameters reported: %d of %d total (the rest are host-side MIDI CC "
                     "automation entries)\n",
                     own, params.size());
     }

@@ -8,8 +8,13 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$src = 'C:\Users\bbhal\VST3\SH-101.vst3'
-$dst = Join-Path $Destination 'SH-101.vst3'
+
+# The bundle name is ASCII; the instrument's displayed name (which contains a
+# non-ASCII letter) is compiled into the plugin, not derived from the file name.
+$bundleName = 'OstraTorn101.vst3'
+
+$src = Join-Path 'C:\Users\bbhal\VST3' $bundleName
+$dst = Join-Path $Destination $bundleName
 $resultFile = 'C:\Users\bbhal\VST3\install-result.txt'
 
 try {
@@ -19,7 +24,14 @@ try {
     if (Test-Path -LiteralPath $dst) { Remove-Item -LiteralPath $dst -Recurse -Force }
     Copy-Item -LiteralPath $src -Destination $dst -Recurse -Force
 
-    $dll = Join-Path $dst 'Contents\x86_64-win\SH-101.vst3'
+    # Remove bundles from earlier names, so a host does not list several
+    # instruments that are the same plugin.
+    foreach ($obsoleteName in @('SH-101.vst3', ([string][char]0x00D6 + 'straTorn101.vst3'))) {
+        $obsolete = Join-Path $Destination $obsoleteName
+        if (Test-Path -LiteralPath $obsolete) { Remove-Item -LiteralPath $obsolete -Recurse -Force }
+    }
+
+    $dll = Join-Path $dst ('Contents\x86_64-win\' + $bundleName)
     if (-not (Test-Path -LiteralPath $dll)) { throw "copy completed but the plugin DLL is missing" }
 
     $size = (Get-Item -LiteralPath $dll).Length

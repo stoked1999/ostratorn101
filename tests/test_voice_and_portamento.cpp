@@ -220,6 +220,10 @@ SH101_TEST(engine_portamento_on_and_auto_behaviour) {
     {
         SH101Engine engine;
         engine.prepare(sr, 1);
+        // This assertion is about the portamento law, so the calibrated core is
+        // measured: the analog pitch tolerance (AnalogVariation) is a deliberate
+        // departure from the ideal CV and is covered by tests/test_analog.cpp.
+        engine.setAnalogVariationEnabled(false);
         SH101Params p = portamentoTestParams(Portamento::Auto, 0.5);
         engine.setParams(p);
         engine.noteOn(48, 1.0);
