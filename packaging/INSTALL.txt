@@ -1,0 +1,54 @@
+ÖstraTorn101 — analogue mono synthesizer (VST3, Windows 64-bit)
+================================================================
+
+What this is
+------------
+A monophonic synthesizer that recreates the signal flow and behaviour of the
+1982 Roland SH-101: one oscillator (saw / pulse / sub / noise), a resonant
+low-pass filter, one envelope, an LFO, an arpeggiator and a 100-step sequencer.
+43 factory presets, plus a preset library you can save into.
+
+It is a standalone VST3 bundle — there is no installer, no licence key and
+nothing to unregister. Deleting the folder removes it completely.
+
+How to install
+--------------
+1. Unzip so you have the folder  OstraTorn101.vst3
+2. Copy that whole folder into:
+       C:\Program Files\Common Files\VST3
+   (Windows will ask for administrator permission — that is normal)
+3. Start your DAW. If it was already running, restart it, or use its
+   "rescan plug-ins" option.
+4. Look for  ÖstraTorn101  in the plug-in list, under instruments.
+
+If you cannot install into Program Files, most DAWs also accept a "custom VST3
+folder" setting — point it at any folder holding OstraTorn101.vst3 and rescan.
+
+Using it
+--------
+* Drop it on an instrument/MIDI track and play; it responds to note velocity
+  only as on/off, like the original.
+* The PRESET row at the top is the preset library:
+      <  >        step through presets
+      the window  pick any preset from the list
+      SAVE        save the current sound under a new name
+      LOAD        load a preset from a file
+      MENU        delete a preset, or open the preset folder
+* Your own presets are stored as small text files in
+      %APPDATA%\ÖstraTorn101\Presets
+  (paste that path into the address bar of Explorer). Copy them to another
+  machine and they will show up in the list there too.
+* Faders: drag, or double-click to return one to the reference patch.
+* POWER is a real standby: it mutes the output without stopping the note.
+* The LEDs to the right of the nameplate are an output level meter.
+
+Requirements
+------------
+64-bit Windows, and a host that supports VST3 (Ableton Live 10+, Cubase, Reaper,
+Studio One, Bitwig, FL Studio, ...). Tested against Ableton Live.
+
+Notes
+-----
+Behaviour and sound are modelled from the instrument's service documentation —
+this is an independent recreation, not affiliated with or endorsed by Roland.
+The panel credits the instrument it is inspired by.
