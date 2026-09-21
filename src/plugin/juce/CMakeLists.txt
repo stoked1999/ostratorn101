@@ -32,6 +32,8 @@ juce_add_plugin(SH101Plugin
 target_sources(SH101Plugin PRIVATE
     PluginProcessor.cpp
     PluginEditor.cpp
+    CymaticDisplay.cpp
+    StepEditor.cpp
     OstraTornLookAndFeel.cpp
 )
 
@@ -85,6 +87,8 @@ juce_add_console_app(sh101_editor_test PRODUCT_NAME "sh101_editor_test")
 target_sources(sh101_editor_test PRIVATE
     PluginProcessor.cpp
     PluginEditor.cpp
+    CymaticDisplay.cpp
+    StepEditor.cpp
     OstraTornLookAndFeel.cpp
     "${CMAKE_CURRENT_SOURCE_DIR}/../../../tools/editor_test.cpp"
 )

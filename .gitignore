@@ -34,3 +34,5 @@ build-plugin-msvc.log
 install-run.log
 install-result.txt
 build-ui.log
+packaging/*.zip
+build-vst3-run.log

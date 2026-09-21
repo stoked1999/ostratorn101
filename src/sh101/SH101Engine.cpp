@@ -132,6 +132,11 @@ void SH101Engine::applyParams() {
     arp_.setOctaves(pending_.arpOctaves);
     seq_.setEnabled(pending_.seqOn);
     seq_.setRate(pending_.seqRate);
+    // v1.0 step-editor controls: the sequence's length, gate and transpose are
+    // host parameters, so they arrive with every parameter commit.
+    seq_.setLength(pending_.seqLength);
+    seq_.setGateLength(pending_.seqGate);
+    seq_.setTranspose(pending_.seqTranspose);
 
     // Sample-rate-smoothed: cutoff, resonance, levels, depths, tune.
     smCutoffOct_.setTarget(std::log2(clampd(pending_.cutoff, cal_.filterFcMinHz, cal_.filterFcMaxHz)
@@ -199,6 +204,17 @@ void SH101Engine::updateHeldNotesForArp() {
     heldDirty_ = false;
 }
 
+void SH101Engine::applySourceGate(bool sourceGate, bool& latched, bool& triggerNow) {
+    if (sourceGate == latched) return;
+    latched = sourceGate;
+    if (sourceGate) {
+        triggerNow = true;
+        startNote(pending_.envTrigger == SH101Envelope::GateAndTrig);
+    } else {
+        env_.noteOff();
+    }
+}
+
 // Every note start — keyboard, arpeggiator step or sequencer step — draws this
 // note's analog tolerance: a fixed small pitch error from the keyboard CV path
 // and a small RC variation on the envelope segment times.  Both are deterministic
@@ -222,6 +238,18 @@ double SH101Engine::processOne() {
     bool legatoNow = false;
     bool noteChangedNow = false;
 
+    // A source that is switched off mid-note never reports its gate falling — its
+    // process() is no longer called at all — so release it here, or the note is
+    // left gated with nothing driving it.
+    if (!pending_.seqOn && seqGate_) {
+        seqGate_ = false;
+        env_.noteOff();
+    }
+    if (!pending_.arpOn && arpGate_) {
+        arpGate_ = false;
+        env_.noteOff();
+    }
+
     if (pending_.seqOn) {
         const StepSequencer::Event ev = seq_.process();
         if (ev.noteChange) {
@@ -229,15 +257,9 @@ double SH101Engine::processOne() {
             lastSeqStep_ = seq_.currentIndex();
             noteChangedNow = true;
         }
-        if (ev.gateChange) {
-            seqGate_ = ev.gate;
-            if (ev.gate) {
-                triggerNow = true;
-                startNote(pending_.envTrigger == SH101Envelope::GateAndTrig);
-            } else {
-                env_.noteOff();
-            }
-        }
+        // The gate comes from the sequencer's own state, so a rest, a tie or a
+        // pattern that runs out still releases the note.
+        applySourceGate(seq_.gateHigh(), seqGate_, triggerNow);
         gateNow = seqGate_;
     } else if (pending_.arpOn) {
         if (heldDirty_) updateHeldNotesForArp();
@@ -246,15 +268,9 @@ double SH101Engine::processOne() {
             sourceNote_ = arp_.currentNote();
             noteChangedNow = true;
         }
-        if (ev.gateChange) {
-            arpGate_ = ev.gate;
-            if (ev.gate) {
-                triggerNow = true;
-                startNote(pending_.envTrigger == SH101Envelope::GateAndTrig);
-            } else {
-                env_.noteOff();
-            }
-        }
+        // ...and likewise here: releasing the last key empties the arpeggiator's
+        // pattern, and its gate falls with no event to say so.
+        applySourceGate(arp_.gateHigh(), arpGate_, triggerNow);
         gateNow = arpGate_;
     } else {
         // Keyboard: consume the ordered gate transitions.  A host hands over the

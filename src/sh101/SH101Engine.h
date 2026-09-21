@@ -106,6 +106,12 @@ private:
     // Starts a note with this key press's tolerance applied: fresh per-note pitch
     // error and RC tolerance, then the gate into the envelope.
     void startNote(bool retrigger);
+    // The envelope follows its note source's gate *state*, edge by edge.  Taking
+    // the edge from the state and not only from the source's event is what makes
+    // a gate that falls without an event still release: the arpeggiator's gate
+    // drops inside rebuildPattern() when the last key is released, and a source
+    // that is switched off mid-note never reports a fall at all.
+    void applySourceGate(bool sourceGate, bool& latched, bool& triggerNow);
 
     double sr_ = 48000.0;
     int    oversampleFactor_ = 2;

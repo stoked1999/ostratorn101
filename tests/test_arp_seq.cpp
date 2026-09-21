@@ -3,11 +3,14 @@
 // Validation list from the brief: "arp patterns and clocking", "sequencer
 // playback semantics".
 #include <cstdio>
+#include <cstring>
 #include <vector>
 
 #include "TestFramework.h"
 #include "TestHelpers.h"
 #include "sh101/Arpeggiator.h"
+#include "sh101/Params.h"
+#include "sh101/SH101Engine.h"
 #include "sh101/StepSequencer.h"
 
 using namespace sh101;
@@ -30,6 +33,13 @@ std::vector<int> collectNotes(Source& src, double sr, double seconds) {
 std::vector<int> take(const std::vector<int>& v, size_t count) {
     std::vector<int> out(v.begin(), v.begin() + std::min(count, v.size()));
     return out;
+}
+
+// Peak of a rendered block, for the "has it stopped sounding" checks.
+double blockPeak(const std::vector<float>& audio) {
+    double p = 0.0;
+    for (float v : audio) p = std::max(p, std::fabs(static_cast<double>(v)));
+    return p;
 }
 
 } // namespace
@@ -234,4 +244,257 @@ SH101_TEST(seq_capacity_and_clocking) {
     const auto ev = seq.process();
     CHECK(ev.noteChange);
     CHECK(ev.note == seq.step(0).note);
+}
+
+// The v1.0 step-editor controls are host parameters: seqLength (1..100 steps),
+// seqGate (gate fraction) and seqTranspose (-24..+24).  This checks the taper in
+// both directions, including the endpoints the panel can reach.
+SH101_TEST(seq_parameter_taper_roundtrip) {
+    SH101Params p;
+    applyNormalized(p, pSeqLength, 0.0);    CHECK(p.seqLength == 1);
+    applyNormalized(p, pSeqLength, 1.0);    CHECK(p.seqLength == 100);
+    applyNormalized(p, pSeqGate, 0.0);      CHECK_NEAR(p.seqGate, 0.05, 1.0e-9);
+    applyNormalized(p, pSeqGate, 1.0);      CHECK_NEAR(p.seqGate, 1.0, 1.0e-9);
+    applyNormalized(p, pSeqTranspose, 0.0); CHECK(p.seqTranspose == -24);
+    applyNormalized(p, pSeqTranspose, 0.5); CHECK(p.seqTranspose == 0);
+    applyNormalized(p, pSeqTranspose, 1.0); CHECK(p.seqTranspose == 24);
+
+    // Engineering -> normalized -> engineering is exact at the integers.
+    for (int steps : { 1, 8, 16, 37, 100 }) {
+        SH101Params q;
+        q.seqLength = steps;
+        SH101Params back;
+        applyNormalized(back, pSeqLength, getNormalized(q, pSeqLength));
+        CHECK(back.seqLength == steps);
+    }
+    for (int semis : { -24, -7, 0, 12, 24 }) {
+        SH101Params q;
+        q.seqTranspose = semis;
+        SH101Params back;
+        applyNormalized(back, pSeqTranspose, getNormalized(q, pSeqTranspose));
+        CHECK(back.seqTranspose == semis);
+    }
+
+    // The parameter table is append-only (session compatibility) and every entry
+    // has a stable name: a missing name would be a null pointer a host would
+    // crash on.
+    CHECK(pSeqGate == pSeqLength + 1);
+    CHECK(pSeqTranspose == pSeqLength + 2);
+    for (int i = 0; i < kNumParams; ++i) {
+        const char* name = paramName(i);
+        CHECK(name != nullptr && std::strcmp(name, "?") != 0 && name[0] != '\0');
+    }
+    CHECK(std::strcmp(paramName(pSeqLength), "seqLength") == 0);
+    CHECK(std::strcmp(paramName(pSeqGate), "seqGate") == 0);
+    CHECK(std::strcmp(paramName(pSeqTranspose), "seqTranspose") == 0);
+}
+
+// The three controls must reach the sequencer the engine is actually running —
+// the check that catches a missing line in applyParams.
+SH101_TEST(seq_parameters_drive_the_engine) {
+    SH101Engine engine;
+    engine.prepare(48000.0, 1);
+    engine.setDeterministicTestMode(true);
+
+    SH101Params p;
+    p.seqOn = true;
+    p.seqRate = 10.0;        // 0.1 s per step: one 4800-sample block per step
+    p.seqLength = 2;
+    p.seqTranspose = 12;
+    p.seqGate = 1.0;
+    engine.setParams(p);
+    engine.sequencer().setStep(0, 36, true, false);
+    engine.sequencer().setStep(1, 38, true, false);
+    engine.sequencer().setStep(2, 40, true, false);   // outside the length
+
+    std::vector<float> buf(4800);
+
+    engine.renderBlock(buf.data(), 4800);
+    CHECK(engine.currentNote() == 48);          // 36 + 12 semitones
+    engine.renderBlock(buf.data(), 4800);
+    CHECK(engine.currentNote() == 50);          // 38 + 12
+    engine.renderBlock(buf.data(), 4800);
+    CHECK(engine.currentNote() == 48);          // length 2: step 2 is not played
+
+    // Long enough for three steps, and the transpose applies there too.
+    p.seqLength = 3;
+    engine.setParams(p);
+    engine.renderBlock(buf.data(), 4800);
+    CHECK(engine.currentNote() == 50);
+    engine.renderBlock(buf.data(), 4800);
+    CHECK(engine.currentNote() == 52);          // 40 + 12
+
+    // Gate length, measured through the engine's own gate state over whole
+    // steps (step 0 is aligned by rendering one full step first).
+    std::printf("      engine gate fractions: ");
+    for (double requested : { 1.0, 0.5, 0.25, 0.05 }) {
+        p.seqLength = 1;
+        p.seqGate = requested;
+        engine.setParams(p);
+        engine.renderBlock(buf.data(), 4800);   // align to a step boundary
+        int high = 0;
+        for (int i = 0; i < 4800; ++i) {
+            engine.renderSample();
+            if (engine.gate()) ++high;
+        }
+        const double fraction = static_cast<double>(high) / 4800.0;
+        std::printf("%.2f ", fraction);
+        CHECK_NEAR(fraction, requested, 0.03);
+    }
+    std::printf("\n");
+
+    // Transpose of 0 means the stored notes play untransposed.
+    p.seqTranspose = 0;
+    p.seqLength = 2;
+    engine.setParams(p);
+    engine.renderBlock(buf.data(), 4800);       // advances into step 1
+    CHECK(engine.currentNote() == 38);
+    engine.renderBlock(buf.data(), 4800);       // wraps to step 0, untransposed
+    CHECK(engine.currentNote() == 36);
+}
+
+// ---------------------------------------------------------------------------
+// Releasing the last key must stop the voice, whatever point of the arp step the
+// release lands on.  The gate is high for the first part of every step, so a
+// release inside that window is the case that matters: the pattern empties
+// inside the arpeggiator, and nothing downstream is told the gate fell.
+// ---------------------------------------------------------------------------
+SH101_TEST(arp_stops_when_the_last_key_is_released) {
+    const double sr = 48000.0;
+    const int stepSamples = 4800;          // 10 Hz: one step is 0.1 s
+    int stuck = 0;
+    int cases = 0;
+    int silentBeforeRelease = 0;
+    double worstPeak = 0.0;
+    int worstAt = -1;
+
+    // The arpeggiator's first step lands one step after the key goes down, so
+    // the release is placed inside the *second* step, swept across it.
+    for (int offset = 0; offset < stepSamples; offset += 300) {
+        SH101Engine engine;
+        engine.prepare(sr, 1);
+        engine.setDeterministicTestMode(true);
+        SH101Params p;
+        p.arpOn = true;
+        p.arpRate = 10.0;
+        p.arpMode = Arpeggiator::Up;
+        p.arpOctaves = 1;
+        engine.setParams(p);
+
+        std::vector<float> buf(600);
+        engine.noteOn(60, 1.0);
+
+        int rendered = 0;
+        const int releasePoint = stepSamples + offset;   // inside the second step
+        double peakBeforeRelease = 0.0;
+        while (rendered < releasePoint) {
+            const int n = std::min<int>(600, releasePoint - rendered);
+            engine.renderBlock(buf.data(), n);
+            rendered += n;
+            if (rendered > releasePoint - 1200) peakBeforeRelease = std::max(peakBeforeRelease, blockPeak(buf));
+        }
+        // The case is only meaningful if the arpeggiator was actually sounding.
+        // (At the very start of a step the note has only just been gated on, so
+        // the guard applies from one block in.)
+        if (offset >= 600 && peakBeforeRelease < 0.05) ++silentBeforeRelease;
+
+        engine.noteOff(60);
+
+        // Three quarters of a second past the release: the envelope has had far
+        // longer than its release time to fall.
+        double tailPeak = 0.0;
+        bool stuckGate = false;
+        for (int block = 0; block < 60; ++block) {
+            engine.renderBlock(buf.data(), 600);
+            if (block >= 40) tailPeak = std::max(tailPeak, blockPeak(buf));
+            if (block >= 40 && engine.gate()) stuckGate = true;
+        }
+
+        ++cases;
+        if (tailPeak > 0.02 || stuckGate) {
+            ++stuck;
+            if (tailPeak > worstPeak) {
+                worstPeak = tailPeak;
+                worstAt = offset;
+            }
+        }
+    }
+    std::printf("      release swept over the step: %d of %d still sounding "
+                "(worst peak %.4f, release at +%d samples), %d case(s) not sounding "
+                "before the release\n",
+                stuck, cases, worstPeak, worstAt, silentBeforeRelease);
+    CHECK(silentBeforeRelease == 0);   // guards against a vacuous pass
+    CHECK(stuck == 0);
+}
+
+// The same gate, reached from the other direction: switching the note source off
+// while its gate is high must release the note too.
+SH101_TEST(switching_a_note_source_off_releases_a_gated_note) {
+    const double sr = 48000.0;
+
+    // Arpeggiator: ARP ON -> OFF while its gate is high (600 samples into the
+    // second step, i.e. inside the gate window).
+    {
+        SH101Engine engine;
+        engine.prepare(sr, 1);
+        engine.setDeterministicTestMode(true);
+        SH101Params p;
+        p.arpOn = true;
+        p.arpRate = 10.0;
+        engine.setParams(p);
+
+        std::vector<float> buf(600);
+        engine.noteOn(60, 1.0);
+        double soundingPeak = 0.0;
+        for (int block = 0; block < 9; ++block) {   // one step, then into the next
+            engine.renderBlock(buf.data(), 600);
+            if (block >= 8) soundingPeak = std::max(soundingPeak, blockPeak(buf));
+        }
+        CHECK(soundingPeak > 0.05);                 // it was sounding first
+        engine.noteOff(60);
+        p.arpOn = false;
+        engine.setParams(p);
+
+        double tailPeak = 0.0;
+        for (int block = 0; block < 60; ++block) {
+            engine.renderBlock(buf.data(), 600);
+            if (block >= 40) tailPeak = std::max(tailPeak, blockPeak(buf));
+        }
+        std::printf("      arp switched off mid-gate: sounding %.4f, tail peak %.4f\n",
+                    soundingPeak, tailPeak);
+        CHECK(tailPeak < 0.02);
+    }
+
+    // Sequencer: SEQ ON -> OFF while its gate is high, the same way.
+    {
+        SH101Engine engine;
+        engine.prepare(sr, 1);
+        engine.setDeterministicTestMode(true);
+        SH101Params p;
+        p.seqOn = true;
+        p.seqRate = 10.0;
+        p.seqGate = 1.0;                            // gate high for the whole step
+        engine.setParams(p);
+        engine.sequencer().setStep(0, 60, true, false);
+        engine.sequencer().setStep(1, 64, true, false);
+
+        std::vector<float> buf(600);
+        double soundingPeak = 0.0;
+        for (int block = 0; block < 9; ++block) {   // one step, then into the next
+            engine.renderBlock(buf.data(), 600);
+            if (block >= 8) soundingPeak = std::max(soundingPeak, blockPeak(buf));
+        }
+        CHECK(soundingPeak > 0.05);
+        p.seqOn = false;
+        engine.setParams(p);
+
+        double tailPeak = 0.0;
+        for (int block = 0; block < 60; ++block) {
+            engine.renderBlock(buf.data(), 600);
+            if (block >= 40) tailPeak = std::max(tailPeak, blockPeak(buf));
+        }
+        std::printf("      sequencer switched off mid-gate: sounding %.4f, tail peak %.4f\n",
+                    soundingPeak, tailPeak);
+        CHECK(tailPeak < 0.02);
+    }
 }

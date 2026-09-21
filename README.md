@@ -6,20 +6,23 @@ brief in [`docs/engineering-brief.md`](docs/engineering-brief.md) (revision
 "SONIC FIDELITY FIRST").  The panel credits the instrument it is inspired by and
 reproduces no manufacturer branding.
 
-Status: **working prototype — complete, built, installed and verified.** This is
-the release-quality starting point: [`docs/ROADMAP.md`](docs/ROADMAP.md) tracks
-what is finished and what is still open (sequencer step editor, randomizer,
-animation, product completeness).
+Status: **working prototype — complete, built, installed and verified.** The
+sequencer step editor and the cymatic display are in, and a released key now
+always stops the arpeggiator's note; [`docs/ROADMAP.md`](docs/ROADMAP.md) tracks
+what is finished and what is still open (randomizer, the rest of the animation
+work, product completeness).
 
-* The DSP voice is validated by the engine test suite: **78 cases / 3518 checks**,
-  plus a preset-bank suite and a preset-file suite.
+* The DSP voice is validated by the engine test suite: **82 cases / 3723 checks**,
+  plus a preset-bank suite and a preset-file suite.  The arpeggiator's release is
+  checked at every point of its step, not just at one.
 * The VST3 is built with MSVC + JUCE 8.0.15, installed in Live's default VST3
   folder, and verified through JUCE's own hosting classes
-  (`tools/vst3_host_test.cpp`): it scans as an instrument, reports its 34
+  (`tools/vst3_host_test.cpp`): it scans as an instrument, reports its 37
   parameters, accepts MIDI, produces audio and creates its editor.
 * The panel is verified by `tools/editor_test.cpp`, which builds the plugin's own
-  editor, snapshots it to `renders/plugin_ui.png` and checks that it lays its
-  controls out, paints, and round-trips a user preset through the library.
+  editor, snapshots it to `renders/plugin_ui.png`, checks that it lays its controls
+  out and paints, round-trips a user preset through the library, writes notes into
+  the step editor and measures the cymatic figure's amber.
 * 43 factory presets, exposed both in the panel and as the plugin's host programs,
   and a user preset library that saves patches as files.
 
@@ -50,11 +53,14 @@ src/sh101/          the voice — one class per block, named after the brief's o
 
 src/plugin/         host-facing layer
   SH101HostAdapter    MIDI, automation, sustain pedal, panic, block rendering
-  juce/               VST3/Standalone shell: processor, panel editor, look-and-feel
+  juce/               VST3/Standalone shell: processor, panel editor, look-and-feel,
+                      StepEditor (the sequencer's 16-slot programming row),
+                      CymaticDisplay (the sound made visible beside the meter)
 
-tests/              78 test cases / 3518 checks — the acceptance evidence
+tests/              82 test cases / 3723 checks — the acceptance evidence
 tools/              render_cli (WAV, incl. --preset), bench_cli (CPU), alias_probe,
-                    adapter_probe, editor_test (panel + preset library smoke test),
+                    adapter_probe, editor_test (panel, step editor, preset library,
+                    cymatic display),
                     vst3_host_test, verify_renders.py, check_no_alloc.py
 docs/               engineering brief, validation report, approximation register
 renders/            WAV renders of eight demo patches + renders/presets/ (43 patches)
@@ -69,7 +75,8 @@ positions, indicator LEDs, panel screws, a nameplate and a level meter.
 
 ```
 row 1:  LFO · VCO · SOURCE MIXER · VCF · VCA · ENV
-row 2:  ARPEGGIATOR · SEQUENCER · PERFORMANCE ·  nameplate and level meter
+row 2:  ARPEGGIATOR · SEQUENCER · PERFORMANCE ·  nameplate, cymatic window and level meter
+row 3:  SEQUENCER — STEP EDITOR: REC · FOLLOW · paging · 16 step slots
 ```
 
 Every fader shows the value it currently holds in engineering units (Hz, ms, %,

@@ -89,6 +89,16 @@ OstraTornAudioProcessor::OstraTornAudioProcessor()
         rawToNormalized_[static_cast<size_t>(i)] =
             choice ? (1.0f / static_cast<float>(itemCount - 1)) : 1.0f;
     }
+    // The sequence memory starts the way the engine's own does (note 60 on every
+    // step), so the step editor and a fresh instance agree before anything has
+    // been programmed.
+    for (auto& step : patternMirror_) {
+        step.note = 60;
+        step.gate = true;
+        step.tie = false;
+    }
+    patternAtLoad_ = patternMirror_;
+
     loadPreset(0);   // the bank's reference patch, matching the parameter defaults
 
     float values[sh101::kNumParams] = {};
@@ -104,6 +114,13 @@ void OstraTornAudioProcessor::readParameterSnapshot(float* destination) const {
         destination[i] = parameterPointers_[static_cast<size_t>(i)]->load()
                          * rawToNormalized_[static_cast<size_t>(i)];
     }
+}
+
+// One parameter, converted to the normalized value the engine's taper expects.
+float OstraTornAudioProcessor::normalizedParam(int paramId) const {
+    if (paramId < 0 || paramId >= sh101::kNumParams) return 0.0f;
+    return parameterPointers_[static_cast<size_t>(paramId)]->load()
+           * rawToNormalized_[static_cast<size_t>(paramId)];
 }
 
 void OstraTornAudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlock) {
@@ -128,10 +145,32 @@ bool OstraTornAudioProcessor::isBusesLayoutSupported(const BusesLayout& layouts)
 }
 
 // ---- Sequencer pattern hand-over -------------------------------------------
+// A document's pattern (a loaded preset, a restored session) is adopted by the
+// message thread's mirror and then queued for the audio thread.
+void OstraTornAudioProcessor::adoptPattern(const sh101::PresetDocument& doc) {
+    for (int i = 0; i < sh101::StepSequencer::kMaxSteps; ++i) {
+        patternMirror_[static_cast<size_t>(i)] = doc.steps[i];
+    }
+    queuePattern(doc);
+}
+
 void OstraTornAudioProcessor::queuePattern(const sh101::PresetDocument& doc) {
     if (doc.stepCount <= 0) return;
     const juce::SpinLock::ScopedLockType lock(patternLock_);
     pendingPattern_ = doc;
+    pendingPatternReady_.store(true, std::memory_order_release);
+}
+
+// The step editor's edits go through here: the mirror is the message thread's
+// source of truth and the audio thread gets a copy it applies under its own
+// try-lock.  The sequence length is deliberately NOT part of this hand-over — it
+// is the seqLength parameter, so the engine applies it with every commit.
+void OstraTornAudioProcessor::publishPattern() {
+    const juce::SpinLock::ScopedLockType lock(patternLock_);
+    pendingPattern_.stepCount = patternLength();
+    for (int i = 0; i < sh101::StepSequencer::kMaxSteps; ++i) {
+        pendingPattern_.steps[i] = patternMirror_[static_cast<size_t>(i)];
+    }
     pendingPatternReady_.store(true, std::memory_order_release);
 }
 
@@ -142,12 +181,86 @@ void OstraTornAudioProcessor::applyPendingPattern() {
     if (! lock.isLocked()) return;
 
     auto& sequencer = adapter_.engine().sequencer();
-    sequencer.setLength(pendingPattern_.stepCount);
-    for (int i = 0; i < pendingPattern_.stepCount; ++i) {
+    for (int i = 0; i < sh101::StepSequencer::kMaxSteps; ++i) {
         const auto& step = pendingPattern_.steps[i];
         sequencer.setStep(i, step.note, step.gate, step.tie);
     }
     pendingPatternReady_.store(false, std::memory_order_release);
+}
+
+// ---- The step editor's editing API (message thread) ------------------------
+const sh101::StepSequencer::Step& OstraTornAudioProcessor::patternStep(int index) const {
+    return patternMirror_[static_cast<size_t>(
+        juce::jlimit(0, sh101::StepSequencer::kMaxSteps - 1, index))];
+}
+
+int OstraTornAudioProcessor::patternLength() const {
+    sh101::SH101Params p;
+    sh101::applyNormalized(p, sh101::pSeqLength, normalizedParam(sh101::pSeqLength));
+    return p.seqLength;
+}
+
+void OstraTornAudioProcessor::setPatternStep(int index, int note, bool gate, bool tie) {
+    if (index < 0 || index >= sh101::StepSequencer::kMaxSteps) return;
+    auto& step = patternMirror_[static_cast<size_t>(index)];
+    step.note = juce::jlimit(0, 127, note);
+    step.gate = gate;
+    step.tie = tie;
+    publishPattern();
+}
+
+void OstraTornAudioProcessor::setPatternLength(int steps) {
+    steps = juce::jlimit(1, sh101::StepSequencer::kMaxSteps, steps);
+    if (auto* param = apvts_.getParameter(parameterId(sh101::pSeqLength))) {
+        param->setValueNotifyingHost(static_cast<float>((steps - 1) / 99.0));
+    }
+}
+
+// ---- Keyboard capture for REC ----------------------------------------------
+// Audio thread: a single writer, so the write index needs no lock; a full queue
+// drops the event rather than waiting (a lost note in a take beats a blocked
+// callback).
+void OstraTornAudioProcessor::captureNote(int note, bool on, int step) {
+    const unsigned int write = captureWrite_.load(std::memory_order_relaxed);
+    const unsigned int read = captureRead_.load(std::memory_order_acquire);
+    if (write - read >= static_cast<unsigned int>(kCaptureQueueSize)) return;
+    captureQueue_[write % static_cast<unsigned int>(kCaptureQueueSize)] = CapturedNote{ note, on, step };
+    captureWrite_.store(write + 1, std::memory_order_release);
+}
+
+// ---- Signal feed for the cymatic display -----------------------------------
+// Audio thread: one writer, plain stores.  The ring is a power of two and the
+// write index is a free-running counter, so the reader can reconstruct where the
+// newest samples are.
+void OstraTornAudioProcessor::writeScope(const float* samples, int numSamples) {
+    if (samples == nullptr || numSamples <= 0) return;
+    unsigned int index = scopeWrite_.load(std::memory_order_relaxed);
+    for (int i = 0; i < numSamples; ++i) {
+        scopeRing_[index & static_cast<unsigned int>(kScopeRingSize - 1)] = samples[i];
+        ++index;
+    }
+    scopeWrite_.store(index, std::memory_order_release);
+}
+
+int OstraTornAudioProcessor::readScopeSamples(float* destination, int maxSamples) const {
+    const unsigned int write = scopeWrite_.load(std::memory_order_acquire);
+    if (destination == nullptr || maxSamples <= 0 || write == 0) return 0;
+    const int available = static_cast<int>(juce::jmin<unsigned int>(write, kScopeRingSize));
+    const int count = juce::jmin(maxSamples, available);
+    for (int i = 0; i < count; ++i) {
+        destination[i] = scopeRing_[(write - static_cast<unsigned int>(count - i))
+                                    & static_cast<unsigned int>(kScopeRingSize - 1)];
+    }
+    return count;
+}
+
+bool OstraTornAudioProcessor::takeCapturedNote(CapturedNote& out) {
+    const unsigned int read = captureRead_.load(std::memory_order_relaxed);
+    const unsigned int write = captureWrite_.load(std::memory_order_acquire);
+    if (read == write) return false;
+    out = captureQueue_[read % static_cast<unsigned int>(kCaptureQueueSize)];
+    captureRead_.store(read + 1, std::memory_order_release);
+    return true;
 }
 
 void OstraTornAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer,
@@ -164,12 +277,23 @@ void OstraTornAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer,
     adapter_.setParametersNormalized(values, sh101::kNumParams);
 
     // MIDI, in order, before rendering (an event inside the block must not be
-    // lost — the adapter and engine handle events, not just state).
+    // lost — the adapter and engine handle events, not just state).  Note events
+    // are also stamped with the step the sequencer is on and appended to the
+    // capture queue, which is how REC writes played notes into the pattern.
+    const int playStep = (values[sh101::pSeqOn] >= 0.5f)
+                             ? adapter_.engine().sequencer().currentIndex()
+                             : -1;
     for (const auto metadata : midi) {
         const auto message = metadata.getMessage();
         const int size = message.getRawDataSize();
         const juce::uint8* raw = message.getRawData();
         if (size >= 3) {
+            const juce::uint8 type = static_cast<juce::uint8>(raw[0] & 0xf0);
+            if (type == 0x90 && raw[2] > 0) {
+                captureNote(raw[1], true, playStep);
+            } else if (type == 0x80 || (type == 0x90 && raw[2] == 0)) {
+                captureNote(raw[1], false, playStep);
+            }
             adapter_.handleMidiMessage(raw[0], raw[1], raw[2]);
         } else if (size == 2) {
             adapter_.handleMidiMessage(raw[0], raw[1], 0);
@@ -180,6 +304,11 @@ void OstraTornAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer,
     // Audio: render mono and copy to every output channel.
     float* const* channels = buffer.getArrayOfWritePointers();
     adapter_.renderBlock(channels, buffer.getNumChannels(), numSamples);
+
+    // Playhead telemetry for the step editor (read on the message thread).
+    seqPlayStep_.store(adapter_.engine().sequencer().currentIndex(), std::memory_order_relaxed);
+    seqRunning_.store(values[sh101::pSeqOn] >= 0.5f, std::memory_order_relaxed);
+    seqGateHigh_.store(adapter_.engine().sequencer().gateHigh(), std::memory_order_relaxed);
 
     float peak = 0.0f;
     for (int channel = 0; channel < buffer.getNumChannels(); ++channel) {
@@ -193,6 +322,9 @@ void OstraTornAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer,
         peak = 0.0f;
     }
     outputLevel_.store(peak, std::memory_order_relaxed);
+
+    // What the cymatic display draws is what is being heard, standby included.
+    writeScope(buffer.getReadPointer(0), numSamples);
 }
 
 // ---- Presets ---------------------------------------------------------------
@@ -222,9 +354,21 @@ void OstraTornAudioProcessor::applyDocument(const sh101::PresetDocument& doc,
             param->setValueNotifyingHost(static_cast<float>(sh101::getNormalized(doc.params, i)));
         }
     }
-    queuePattern(doc);
+    // A document that carries a sequence programs the step editor as well: the
+    // mirror, the seqLength parameter and the engine's memory stay in step.  A
+    // document without one leaves the sequence memory alone — it is a scratchpad,
+    // the way the sequencer memory of the hardware is.
+    if (doc.stepCount > 0) {
+        setPatternLength(doc.stepCount);
+        adoptPattern(doc);
+    }
 
     loadedParams_ = doc.params;
+    // An older file has no seqLength key, so the pattern it carries is what the
+    // parameter should read; keeping the two in step keeps "modified" honest.
+    if (doc.stepCount > 0) loadedParams_.seqLength = doc.stepCount;
+
+    patternAtLoad_ = patternMirror_;
     currentPresetName_ = name;
     currentPresetIsUser_ = isUser;
 }
@@ -281,11 +425,9 @@ bool OstraTornAudioProcessor::captureDocument(sh101::PresetDocument& out) const 
     }
 
     // The sequencer memory is not a parameter, so it is captured here; otherwise
-    // a saved preset would lose the pattern it was built around.
-    const auto& sequencer = adapter_.engine().sequencer();
-    sh101::StepSequencer::Step steps[sh101::StepSequencer::kMaxSteps];
-    for (int i = 0; i < sequencer.length(); ++i) steps[i] = sequencer.step(i);
-    doc.setPattern(steps, sequencer.length());
+    // a saved preset would lose the pattern it was built around.  It is read from
+    // the message thread's mirror — the engine's copy belongs to the audio thread.
+    doc.setPattern(patternMirror_.data(), patternLength());
 
     out = doc;
     return true;
@@ -301,7 +443,9 @@ bool OstraTornAudioProcessor::saveUserPreset(const juce::String& name) {
     const juce::File directory = userPresetDirectory();
     if (! directory.exists() && ! directory.createDirectory().wasOk()) return false;
 
-    return userPresetFile(name).replaceWithText(fromUtf8(sh101::serialisePreset(doc)));
+    const bool saved = userPresetFile(name).replaceWithText(fromUtf8(sh101::serialisePreset(doc)));
+    if (saved) patternAtLoad_ = patternMirror_;   // the pattern it holds is now on disk
+    return saved;
 }
 
 bool OstraTornAudioProcessor::loadUserPresetFile(const juce::File& file) {
@@ -333,6 +477,15 @@ bool OstraTornAudioProcessor::presetIsModified() const {
         const float value = parameterPointers_[static_cast<size_t>(i)]->load()
                              * rawToNormalized_[static_cast<size_t>(i)];
         if (std::fabs(value - sh101::getNormalized(loadedParams_, i)) > 1.0e-6) return true;
+    }
+    // A pattern edit marks the preset modified too: the sequence is part of the
+    // sound a preset is.
+    for (int i = 0; i < sh101::StepSequencer::kMaxSteps; ++i) {
+        const auto& now = patternMirror_[static_cast<size_t>(i)];
+        const auto& loaded = patternAtLoad_[static_cast<size_t>(i)];
+        if (now.note != loaded.note || now.gate != loaded.gate || now.tie != loaded.tie) {
+            return true;
+        }
     }
     return false;
 }
@@ -407,7 +560,10 @@ void OstraTornAudioProcessor::setStateInformation(const void* data, int sizeInBy
         }
     }
     doc.stepCount = stepCount;
-    queuePattern(doc);
+    if (stepCount > 0) adoptPattern(doc);
+
+    // A restored session is the unmodified baseline.
+    patternAtLoad_ = patternMirror_;
 
     loadedParams_ = sh101::SH101Params{};
     float snapshot[sh101::kNumParams] = {};

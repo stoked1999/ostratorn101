@@ -1,9 +1,16 @@
-# Inner (elevated) step: copies the built VST3 bundle into a target VST3 folder.
+# Inner (elevated) step: copies one built VST3 bundle into a target VST3 folder.
 # Writes a result file the non-elevated side can read, so the outcome is
 # verifiable rather than assumed.
 #
-# Usage (from the outer script): -Destination 'C:\Program Files\Common Files\VST3'
+# Usage (from the outer script):
+#   -SourceBundle '<...>\SH101Plugin_artefacts\Release\VST3\OstraTorn101.vst3'
+#   -Destination  'C:\Program Files\Common Files\VST3'
+#
+# The source defaults to the build output, NOT to a staging folder: installing a
+# copy that nobody refreshed is exactly how a stale build gets shipped while the
+# installer still reports success (the staged copy is refreshed by the build).
 param(
+    [string]$SourceBundle = 'C:\Users\bbhal\sh101\build-plugin-msvc\src\plugin\juce\SH101Plugin_artefacts\Release\VST3\OstraTorn101.vst3',
     [string]$Destination = 'C:\Program Files\Common Files\VST3'
 )
 
@@ -13,12 +20,16 @@ $ErrorActionPreference = 'Stop'
 # non-ASCII letter) is compiled into the plugin, not derived from the file name.
 $bundleName = 'OstraTorn101.vst3'
 
-$src = Join-Path 'C:\Users\bbhal\VST3' $bundleName
+$src = $SourceBundle
 $dst = Join-Path $Destination $bundleName
 $resultFile = 'C:\Users\bbhal\VST3\install-result.txt'
 
 try {
-    if (-not (Test-Path -LiteralPath $src)) { throw "source bundle not found: $src" }
+    if (-not (Test-Path -LiteralPath $src)) { throw "source bundle not found: $src - build the plugin first" }
+    $srcDll = Join-Path $src ('Contents\x86_64-win\' + $bundleName)
+    if (-not (Test-Path -LiteralPath $srcDll)) { throw "source bundle has no plugin DLL: $srcDll" }
+    $srcHash = (Get-FileHash -LiteralPath $srcDll -Algorithm SHA256).Hash
+
     if (-not (Test-Path -LiteralPath $Destination)) { throw "VST3 folder not found: $Destination" }
 
     if (Test-Path -LiteralPath $dst) { Remove-Item -LiteralPath $dst -Recurse -Force }
@@ -34,9 +45,19 @@ try {
     $dll = Join-Path $dst ('Contents\x86_64-win\' + $bundleName)
     if (-not (Test-Path -LiteralPath $dll)) { throw "copy completed but the plugin DLL is missing" }
 
+    # What was written must be what was built: anything else is a stale install
+    # wearing a success message.
+    $installedHash = (Get-FileHash -LiteralPath $dll -Algorithm SHA256).Hash
+    if ($installedHash -ne $srcHash) {
+        throw "installed copy differs from the build output (source $srcHash, installed $installedHash)"
+    }
+
     $size = (Get-Item -LiteralPath $dll).Length
-    "OK installed=$dst dll_bytes=$size at=$(Get-Date -Format s)" | Set-Content -LiteralPath $resultFile
+    # Append, never overwrite: two destinations report into the same file, and a
+    # failure in the first must not be hidden by the second one's success.
+    "OK installed=$dst dll_bytes=$size sha256=$($installedHash.Substring(0,16)) from=$src at=$(Get-Date -Format s)" |
+        Add-Content -LiteralPath $resultFile
 }
 catch {
-    "FAILED: $($_.Exception.Message)" | Set-Content -LiteralPath $resultFile
+    "FAILED destination=$Destination reason=$($_.Exception.Message)" | Add-Content -LiteralPath $resultFile
 }

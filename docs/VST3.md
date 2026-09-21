@@ -17,6 +17,14 @@ Built with MSVC (Build Tools 14.44.35207 + Windows SDK 10.0.26100) against JUCE
 powershell -NoProfile -ExecutionPolicy Bypass -File tools/install_vst3_all.ps1
 ```
 
+The installer reads the plugin from the **build output**, never from a staging
+folder, and checks the SHA-256 of every copy it writes against the source — a
+stale or partial copy cannot pass as an install.  A running DAW keeps the
+installed plugin loaded and the copy then fails with "access denied"; the
+installer names that cause up front instead of leaving a bare permission error.
+`tools/build_vst3_msvc.bat` refreshes `C:\Users\bbhal\VST3\OstraTorn101.vst3`
+after every build: that copy is what a DAW's "custom VST3 folder" can point at.
+
 ## Verification
 
 `tools/vst3_host_test.cpp` loads the installed bundle through **JUCE's own

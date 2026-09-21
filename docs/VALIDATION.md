@@ -5,10 +5,25 @@ holds a full run).  Tolerances are acceptance thresholds for the modelled
 behaviour; where a comparison against real hardware is still outstanding, that is
 stated explicitly rather than implied by a tight tolerance.
 
+## Update — 2026-09-21 (step editor, cymatic display, arpeggiator release)
+
+The suite stands at **82 cases / 3723 checks, all passing**.  New evidence:
+
+| Added check | What it asserts |
+| --- | --- |
+| `arp_stops_when_the_last_key_is_released` | the voice stops for a key release swept across every point of an arp step (16 offsets, guarded against a vacuous pass) — the case that used to leave the note sounding |
+| `switching_a_note_source_off_releases_a_gated_note` | switching ARP or SEQ off while its gate is high releases the note |
+| editor test — step editor | REC writes a played note into the armed step, the write head advances, and the slots paint |
+| editor test — cymatic display | the figure lights with the sound, reads the played note's pitch, takes its petal count from the note, registers the strike, and draws in the panel's amber (7,769 amber pixels) |
+
+The cymatic figure is drawn on the editor's timer from the same lock-free block
+copy the audio thread already publishes, so it costs the audio path nothing
+(`tools/check_no_alloc.py` covers the audio-thread allocation rule as before).
+
 ## How to reproduce
 
 ```bash
-bash build.sh && ./build/sh101_tests.exe          # 64 cases, 1612 checks, exit 0 = pass
+bash build.sh && ./build/sh101_tests.exe          # 82 cases, 3723 checks, exit 0 = pass
 ./build/sh101_tests.exe filter                    # substring filter for one area
 ./build/sh101_tests.exe preset                    # the preset bank alone (7 cases)
 ./build/sh101_bench.exe 5                         # CPU
@@ -22,7 +37,7 @@ python tools/check_no_alloc.py                    # static no-allocation check
 # Panel UI + preset plumbing (needs the JUCE build; writes the PNG it checks)
 MSYS_NO_PATHCONV=1 cmd /c "C:\\Users\\bbhal\\sh101\\tools\\build_vst3_msvc.bat"
 ./build-plugin-msvc/src/plugin/juce/sh101_editor_test_artefacts/Release/sh101_editor_test.exe renders/plugin_ui.png
-./build-plugin-msvc/sh101_host_test_artefacts/Release/sh101_host_test.exe "C:/Program Files/Common Files/VST3/SH-101.vst3"
+"./build-plugin-msvc/sh101_host_test_artefacts/Release/sh101_host_test.exe "C:/Program Files/Common Files/VST3/OstraTorn101.vst3"
 ```
 
 ## The brief's validation list, mapped to tests

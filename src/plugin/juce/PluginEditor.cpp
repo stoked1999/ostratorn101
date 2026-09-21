@@ -12,7 +12,7 @@ namespace {
 
 // ---- Layout -----------------------------------------------------------------
 constexpr int kWindowWidth = 1440;
-constexpr int kWindowHeight = 646;
+constexpr int kWindowHeight = 822;
 constexpr int kMargin = 12;
 constexpr int kTitleBarHeight = 104;
 constexpr int kPresetBarHeight = 60;
@@ -27,7 +27,12 @@ constexpr int kSwitchCellWidth = 66;
 constexpr int kMaxPanelGap = 56;    // panels never drift further apart than this
 constexpr int kControlHeight = 156; // fader travel + cap
 constexpr int kNameLabelHeight = 14;
-constexpr int kLowerBlockWidth = 360;   // nameplate + level meter in the lower row
+// The lower row's right-hand status block: the nameplate, the cymatic display
+// and the level meter.
+constexpr int kLowerBlockWidth = 540;
+constexpr int kNameplateWidth = 240;
+constexpr int kCymaticWidth = 180;
+constexpr int kStepRowHeight = 170;     // the step editor's own row, below the sections
 
 // ---- Panel short names, in sh101::ParamId order ------------------------------
 // Panel lettering is short by nature (the hardware prints as little as it can);
@@ -38,7 +43,8 @@ const char* const kDisplayName[kNumParams] = {
     "NOISE",     "CUTOFF",    "RES",     "ENV AMT", "LFO AMT",  "KYBD",
     "ATK",       "DEC",       "SUS",     "REL",     "TRIG",     "VCA",
     "TIME",      "MODE",      "VOL",     "BEND",    "ARP ON",   "ARP MODE",
-    "ARP RATE",  "ARP OCT",   "SEQ ON",  "SEQ RATE",
+    "ARP RATE",  "ARP OCT",   "SEQ ON",  "SEQ RATE", "SEQ LEN",  "GATE",
+    "TRANS",
 };
 
 // ---- Tooltips, in sh101::ParamId order ---------------------------------------
@@ -77,6 +83,9 @@ const char* const kTooltip[kNumParams] = {
     "Arpeggiator octave range",
     "Step sequencer on/off (runs while a key is held)",
     "Step sequencer clock rate",
+    "Sequence length in steps (1..100), set by the step editor's pages",
+    "Gate length: how much of each step a note is held for",
+    "Sequence transpose, +/-24 semitones",
 };
 
 juce::String millisecondsText(double seconds) {
@@ -119,6 +128,10 @@ juce::String formatParamValue(int paramId, double normalized) {
         case pBend:            return juce::String(p.bendSemitones, 1) + "st";
         case pArpRate:         return juce::String(p.arpRate, 1) + "Hz";
         case pSeqRate:         return juce::String(p.seqRate, 1) + "Hz";
+        case pSeqLength:       return juce::String(p.seqLength) + " st";
+        case pSeqGate:         return percentText(p.seqGate);
+        case pSeqTranspose:
+            return (p.seqTranspose > 0 ? "+" : "") + juce::String(p.seqTranspose) + " st";
         case pArpOctaves:      return juce::String(p.arpOctaves) + "oct";
         default:               return juce::String(normalized, 2);
     }
@@ -163,7 +176,10 @@ void RockerSwitch::paintButton(juce::Graphics& g, bool highlighted, bool down) {
 
 // ---- Editor -----------------------------------------------------------------
 OstraTornAudioProcessorEditor::OstraTornAudioProcessorEditor(OstraTornAudioProcessor& processor)
-    : juce::AudioProcessorEditor(&processor), processor_(processor) {
+    : juce::AudioProcessorEditor(&processor),
+      processor_(processor),
+      stepEditor_(processor),
+      cymaticDisplay_(processor) {
     setLookAndFeel(&lookAndFeel_);
 
     // ---- Title bar ---------------------------------------------------------
@@ -256,8 +272,14 @@ OstraTornAudioProcessorEditor::OstraTornAudioProcessorEditor(OstraTornAudioProce
     addPanel(0, "ENV", { pAttack, pDecay, pSustain, pRelease, pEnvTrigger });
 
     addPanel(1, "ARPEGGIATOR", { pArpOn, pArpMode, pArpRate, pArpOctaves });
-    addPanel(1, "SEQUENCER", { pSeqOn, pSeqRate });
+    addPanel(1, "SEQUENCER", { pSeqOn, pSeqRate, pSeqLength, pSeqGate, pSeqTranspose });
     addPanel(1, "PERFORMANCE", { pPortamentoMode, pPortamentoTime, pBend });
+
+    // The step editor closes the panel: 16 slots, paged through the whole
+    // 100-step sequence memory.  The cymatic display sits in the status block,
+    // where the instrument's own sound is made visible.
+    addAndMakeVisible(stepEditor_);
+    addAndMakeVisible(cymaticDisplay_);
 
     refreshPresetList();
     refreshPresetDisplay();
@@ -440,6 +462,11 @@ void OstraTornAudioProcessorEditor::resized() {
     auto row1 = area.removeFromTop(kRowHeight);
     layoutRow(1, row1, kLowerBlockWidth);
 
+    area.removeFromTop(kRowGap);
+    stepEditor_.setBounds(area.removeFromTop(kStepRowHeight));
+
+    cymaticDisplay_.setBounds(cymaticBounds());
+
     auto nameplate = nameplateBounds();
     auto nameplateInner = nameplate.reduced(10, 14);
     // Name and strapline sit together, centred on the plate, with the engraved rule
@@ -456,12 +483,18 @@ juce::Rectangle<int> OstraTornAudioProcessorEditor::lowerRightBlockBounds() cons
 }
 
 juce::Rectangle<int> OstraTornAudioProcessorEditor::nameplateBounds() const {
-    return lowerRightBlockBounds().removeFromLeft(240).reduced(0, 22);
+    return lowerRightBlockBounds().removeFromLeft(kNameplateWidth).reduced(0, 22);
+}
+
+juce::Rectangle<int> OstraTornAudioProcessorEditor::cymaticBounds() const {
+    auto block = lowerRightBlockBounds();
+    block.removeFromLeft(kNameplateWidth);
+    return block.removeFromLeft(kCymaticWidth).reduced(6, 10);
 }
 
 juce::Rectangle<int> OstraTornAudioProcessorEditor::levelMeterBounds() const {
     auto block = lowerRightBlockBounds();
-    block.removeFromLeft(240);
+    block.removeFromLeft(kNameplateWidth + kCymaticWidth);
     return block.reduced(10, 14);
 }
 

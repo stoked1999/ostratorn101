@@ -12,6 +12,10 @@
 //     application data.  Saving/loading them is a message-thread operation; the
 //     only thing that crosses to the audio thread is the sequencer pattern, which
 //     is handed over under a try-lock so the callback never blocks.
+//   * The sequencer pattern is edited on the message thread against a mirror of
+//     the sequence memory (patternMirror_); the audio thread owns the engine's
+//     sequencer and receives published copies.  Keyboard notes for REC travel the
+//     other way through a lock-free queue, so neither thread ever waits.
 #pragma once
 
 #include <juce_audio_processors/juce_audio_processors.h>
@@ -79,6 +83,40 @@ public:
     bool currentPresetIsUser() const { return currentPresetIsUser_; }
     bool presetIsModified() const;
 
+    // ---- Sequencer pattern (the step editor) -------------------------------
+    // The panel edits the message thread's mirror of the sequence memory; the
+    // length is the seqLength host parameter.  Every edit is published to the
+    // audio thread through the lock-free pattern hand-over below, so the panel
+    // and the callback never share a lock.  The mirror starts out as the engine's
+    // own default does: note 60 on every step.
+    const sh101::StepSequencer::Step& patternStep(int index) const;
+    int  patternLength() const;                 // from the seqLength parameter
+    void setPatternStep(int index, int note, bool gate, bool tie);
+    void setPatternLength(int steps);           // updates the parameter
+    void publishPattern();                      // mirror -> audio thread
+
+    // Playback telemetry for the playhead, published by the audio thread.
+    int  sequencePlayStep() const { return seqPlayStep_.load(std::memory_order_relaxed); }
+    bool sequenceRunning() const { return seqRunning_.load(std::memory_order_relaxed); }
+    bool sequenceGateHigh() const { return seqGateHigh_.load(std::memory_order_relaxed); }
+
+    // ---- Signal feed for the cymatic display ------------------------------
+    // The audio thread appends the block it just rendered to a lock-free ring;
+    // the display reads the most recent samples on the message thread.  Bounded
+    // and allocation-free: the callback only copies what it has already written.
+    int readScopeSamples(float* destination, int maxSamples) const;
+
+    // ---- Keyboard capture (REC) -------------------------------------------
+    // Notes the host delivered, stamped with the step the sequencer was playing
+    // when they arrived.  The audio thread appends, the message thread drains
+    // (a lock-free SPSC queue).
+    struct CapturedNote {
+        int  note = -1;    // MIDI note number
+        bool on = false;   // note on / note off
+        int  step = -1;    // sequence step at that moment; -1 while stopped
+    };
+    bool takeCapturedNote(CapturedNote& out);
+
     // ---- Panel state ------------------------------------------------------
     // Peak of the last rendered block, for the panel's level meter.
     float outputLevel() const { return outputLevel_.load(std::memory_order_relaxed); }
@@ -97,10 +135,18 @@ public:
 private:
     juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
     void applyDocument(const sh101::PresetDocument& doc, const juce::String& name, bool isUser);
+    // Message thread: make the mirror and the audio thread's copy match a
+    // document's pattern.
+    void adoptPattern(const sh101::PresetDocument& doc);
     void queuePattern(const sh101::PresetDocument& doc);
     void applyPendingPattern();
     // Normalized snapshot of every parameter (see rawToNormalized_).
     void readParameterSnapshot(float* destination) const;
+    float normalizedParam(int paramId) const;
+    // Audio thread: append one keyboard event to the capture queue.
+    void captureNote(int note, bool on, int step);
+    // Audio thread: append the rendered block to the display's ring.
+    void writeScope(const float* samples, int numSamples);
 
     sh101::SH101HostAdapter adapter_{};
     juce::AudioProcessorValueTreeState apvts_;
@@ -117,6 +163,28 @@ private:
     sh101::PresetDocument pendingPattern_{};
     std::atomic<bool> pendingPatternReady_{ false };
     juce::SpinLock patternLock_;
+    // The message thread's copy of the sequence memory (what the step editor
+    // edits, saves and restores), and the copy from the last load, so "modified"
+    // notices a pattern edit as well as a control edit.
+    std::array<sh101::StepSequencer::Step, sh101::StepSequencer::kMaxSteps> patternMirror_{};
+    std::array<sh101::StepSequencer::Step, sh101::StepSequencer::kMaxSteps> patternAtLoad_{};
+
+    // Playback telemetry for the playhead.
+    std::atomic<int>  seqPlayStep_{ -1 };
+    std::atomic<bool> seqRunning_{ false };
+    std::atomic<bool> seqGateHigh_{ false };
+
+    // Keyboard capture for REC (SPSC, audio thread -> message thread).
+    static constexpr int kCaptureQueueSize = 128;
+    std::array<CapturedNote, kCaptureQueueSize> captureQueue_{};
+    std::atomic<unsigned int> captureWrite_{ 0 };
+    std::atomic<unsigned int> captureRead_{ 0 };
+
+    // Signal feed for the cymatic display (SPSC ring, audio -> message thread).
+    // A power of two, so the index wrap is a mask.
+    static constexpr int kScopeRingSize = 8192;
+    std::array<float, kScopeRingSize> scopeRing_{};
+    std::atomic<unsigned int> scopeWrite_{ 0 };
 
     std::atomic<float> outputLevel_{ 0.0f };
     std::atomic<bool> standby_{ false };

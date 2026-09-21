@@ -44,6 +44,12 @@ enum ParamId {
     pArpOctaves,
     pSeqOn,
     pSeqRate,
+    // v1.0 sequencer step-editor controls.  Appended at the end of the enum on
+    // purpose: adding parameters is a session-compatibility event, so new
+    // entries go last and no existing id is ever renumbered.
+    pSeqLength,     // steps in the sequence, 1..100
+    pSeqGate,       // gate length as a fraction of a step, 0.05..1
+    pSeqTranspose,  // sequence transpose, -24..+24 semitones
     kNumParams
 };
 
@@ -118,6 +124,9 @@ struct SH101Params {
     int    arpOctaves = 1;   // 1..3
     bool   seqOn = false;
     double seqRate = 5.0;    // Hz clock
+    int    seqLength = 8;    // steps, 1..100
+    double seqGate = 0.5;    // gate length, fraction of a step
+    int    seqTranspose = 0; // semitones, -24..+24
 };
 
 // ---- Normalized (0..1) <-> engineering mapping ------------------------------
@@ -162,6 +171,12 @@ inline void applyNormalized(SH101Params& p, int id, double n) {
         case pArpOctaves:     p.arpOctaves = clampi(1 + (int)(n * 2.999), 1, 3); break;
         case pSeqOn:          p.seqOn = (n >= 0.5); break;
         case pSeqRate:        p.seqRate = taperExponential(n, 0.5, 30.0); break;
+        // Step-editor controls.  Length and transpose are whole quantities, so
+        // their tapers land on the nearest integer: the panel and the host both
+        // show a count, never a fraction.
+        case pSeqLength:      p.seqLength = clampi(1 + (int)std::lround(n * 99.0), 1, 100); break;
+        case pSeqGate:        p.seqGate = taperLinear(n, 0.05, 1.0); break;
+        case pSeqTranspose:   p.seqTranspose = clampi((int)std::lround(taperLinear(n, -24.0, 24.0)), -24, 24); break;
         default: break;
     }
 }
@@ -202,6 +217,9 @@ inline double getNormalized(const SH101Params& p, int id) {
         case pArpOctaves:     return (p.arpOctaves - 1) / 2.0;
         case pSeqOn:          return p.seqOn ? 1.0 : 0.0;
         case pSeqRate:        return taperExponentialInverse(p.seqRate, 0.5, 30.0);
+        case pSeqLength:      return (clampi(p.seqLength, 1, 100) - 1) / 99.0;
+        case pSeqGate:        return (clampd(p.seqGate, 0.05, 1.0) - 0.05) / 0.95;
+        case pSeqTranspose:   return (clampi(p.seqTranspose, -24, 24) + 24.0) / 48.0;
         default: return 0.0;
     }
 }
@@ -213,7 +231,8 @@ inline const char* paramName(int id) {
         "noiseLevel", "cutoff", "resonance", "filterEnvAmount", "filterModAmount",
         "keyTrack", "attack", "decay", "sustain", "release", "envTrigger", "vcaMode",
         "portamentoTime", "portamentoMode", "volume", "bend", "arpOn", "arpMode",
-        "arpRate", "arpOctaves", "seqOn", "seqRate"
+        "arpRate", "arpOctaves", "seqOn", "seqRate", "seqLength", "seqGate",
+        "seqTranspose"
     };
     return (id >= 0 && id < kNumParams) ? names[id] : "?";
 }

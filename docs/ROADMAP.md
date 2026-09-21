@@ -1,8 +1,8 @@
 # ÖstraTorn101 — v1.0 roadmap
 
 Status of this document: the agreed scope for the next version. The current
-installed build is a working prototype (43 presets, preset library, panel,
-analogue variation); v1.0 is the release-quality product.
+installed build is a working prototype that now also carries the sequencer step
+editor and the cymatic display; v1.0 is the release-quality product.
 
 ## What is already done
 
@@ -12,12 +12,18 @@ analogue variation); v1.0 is the release-quality product.
 * 43 factory presets exposed as host programs; save/load/delete user preset
   library on disk.
 * Analogue variation: bounded drift, per-note tolerance, output noise floor.
+* Sequencer step editor: 16 slots paged through the 100-step memory — drag a slot
+  for pitch, click for a rest, shift/right-click for a tie, REC writes played notes
+  in and advances, FOLLOW keeps the page on the running sequence.
+* Cymatic display beside the level meter: the standing-wave figure the note makes
+  on the plate, drawn on the editor's timer and fed by the audio thread's own
+  lock-free block copy.
 * VST3 built, installed in both system VST3 folders, verified through a host.
 
-## 1. Sequencer step editor  (agreed, not started)
+## 1. Sequencer step editor  (built)
 
-The single biggest functional gap: the sequencer plays preset melodies but cannot
-be programmed. Target:
+The sequencer plays preset melodies and can now be programmed from the panel.
+What it does:
 
 * 16 step slots on the panel, paged up to 100 steps, showing each step's note.
 * Drag a slot to set pitch; click for rest; shift/right-click for tie.
@@ -48,6 +54,14 @@ Requested as "sick". Aim for *musical* randomness, not noise:
 
 Tasteful, hardware-believable motion rather than decoration:
 
+* **Cymatic display (requested): the sound made visible — built; see
+  `renders/cymatic_field.png`.**  A water-plate ripple
+  figure in the panel's amber, standing in the status block beside the level
+  meter: the note being played sets the petal count, brightness sets the rings,
+  the envelope drives the glow, and every note strike sends a ripple out through
+  the pattern.  It reads a lock-free copy of the rendered block (the audio
+  thread only appends) and is rendered on the editor's timer, so it costs the
+  audio thread nothing.
 * Amber LED and level-meter ballistics on the meter that already exists.
 * Playhead sweeping the step editor.
 * A slow, tiny glow/vibration on the LFO rate indicator and on active envelopes.

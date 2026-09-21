@@ -62,6 +62,11 @@ void drawSectionPanel(juce::Graphics& g, juce::Rectangle<float> area, bool raise
 }
 
 void drawTintedDisplay(juce::Graphics& g, juce::Rectangle<float> area) {
+    // Callers keep drawing after this (the cymatic display draws its figure
+    // straight after): the stroked hairline below leaves state behind in the
+    // context that dims or erases the next drawImage, so contain it here and
+    // give the caller back exactly the context it handed over.
+    g.saveState();
     const float corner = 2.5f;
     g.setGradientFill(juce::ColourGradient(Palette::displayTop, area.getX(), area.getY(),
                                            Palette::displayBottom, area.getX(), area.getBottom(), false));
@@ -72,6 +77,7 @@ void drawTintedDisplay(juce::Graphics& g, juce::Rectangle<float> area) {
     g.setColour(juce::Colours::white.withAlpha(0.10f));
     g.drawLine(area.getX() + corner, area.getBottom() - 0.5f, area.getRight() - corner,
                area.getBottom() - 0.5f, 1.0f);
+    g.restoreState();
 }
 
 void drawScrew(juce::Graphics& g, juce::Point<float> centre, float radius) {

@@ -124,6 +124,21 @@ if errorlevel 1 (
     exit /b 1
 )
 
+rem The staging folder is what docs/VST3.md calls "the current build" and what a
+rem DAW's custom VST3 folder can point at, so refresh it from this build.  The
+rem installer reads the build output itself, so a stale staging copy can no
+rem longer be installed by mistake.
+if not defined STAGE set "STAGE=%USERPROFILE%\VST3"
+set "ARTEFACT=%BUILD%\src\plugin\juce\SH101Plugin_artefacts\Release\VST3\OstraTorn101.vst3"
+if exist "%ARTEFACT%\Contents\x86_64-win\OstraTorn101.vst3" (
+    if not exist "%STAGE%" mkdir "%STAGE%"
+    if exist "%STAGE%\OstraTorn101.vst3" rd /s /q "%STAGE%\OstraTorn101.vst3"
+    xcopy /e /i /q /y "%ARTEFACT%" "%STAGE%\OstraTorn101.vst3" >nul
+    echo == staged "%STAGE%\OstraTorn101.vst3" ==
+) else (
+    echo WARNING: built bundle not found at "%ARTEFACT%"
+)
+
 echo == done ==
 endlocal
 exit /b 0

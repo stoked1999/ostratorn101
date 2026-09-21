@@ -38,9 +38,24 @@ Using it
       %APPDATA%\ÖstraTorn101\Presets
   (paste that path into the address bar of Explorer). Copy them to another
   machine and they will show up in the list there too.
+* The SEQUENCER - STEP EDITOR row at the bottom programs the 100-step memory,
+  sixteen steps at a time:
+      REC         arms step write: play a note and it is written into the armed
+                  step, then the write head advances - the way the instrument
+                  records.  Press REC again to leave it.
+      FOLLOW      keeps the page following the running sequence
+      <  >        page through the whole memory
+      drag a slot up/down to set its pitch (the note name is shown)
+      click a slot for a rest, click a rest to bring it back
+      shift-click or right-click a slot to tie it into the next one
+  The sequencer plays what the step editor shows; sequenced presets arrive with
+  their pattern already in place.
 * Faders: drag, or double-click to return one to the reference patch.
 * POWER is a real standby: it mutes the output without stopping the note.
-* The LEDs to the right of the nameplate are an output level meter.
+* The LEDs to the right of the nameplate are an output level meter, and the round
+  window beside them is the cymatic display - the sound made visible: the note
+  being played sets the figure's petals, brightness sets its rings, and every
+  note strike sends a ripple through it.
 
 Requirements
 ------------

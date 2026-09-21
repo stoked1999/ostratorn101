@@ -18,8 +18,10 @@
 #include <memory>
 #include <vector>
 
+#include "CymaticDisplay.h"
 #include "OstraTornLookAndFeel.h"
 #include "PluginProcessor.h"
+#include "StepEditor.h"
 
 // The panel's power switch: a rocker that mutes the output (standby).
 class RockerSwitch : public juce::Button {
@@ -37,6 +39,11 @@ public:
 
     void paint(juce::Graphics& g) override;
     void resized() override;
+
+    // The step editor and the cymatic display, exposed so the editor test can
+    // drive them without a running message loop.
+    StepEditor& stepEditor() { return stepEditor_; }
+    CymaticDisplay& cymaticDisplay() { return cymaticDisplay_; }
 
 private:
     struct Control {
@@ -81,11 +88,14 @@ private:
     // apart.
     juce::Rectangle<int> lowerRightBlockBounds() const;
     juce::Rectangle<int> nameplateBounds() const;
+    juce::Rectangle<int> cymaticBounds() const;
     juce::Rectangle<int> levelMeterBounds() const;
     void updatePresetDescription();
 
     OstraTornAudioProcessor& processor_;
     OstraTornLookAndFeel lookAndFeel_;
+    StepEditor stepEditor_;
+    CymaticDisplay cymaticDisplay_;
 
     std::vector<Control> controls_;
     std::vector<Panel> panels_;
