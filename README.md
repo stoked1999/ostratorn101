@@ -23,6 +23,8 @@ work, product completeness).
   editor, snapshots it to `renders/plugin_ui.png`, checks that it lays its controls
   out and paints, round-trips a user preset through the library, writes notes into
   the step editor and measures the cymatic figure's amber.
+* The sequencer runs on a musical tempo: a BPM (20..300) and a step division
+  (1/4 .. 1/32), or the host's tempo when its clock is set to Host.
 * 43 factory presets, exposed both in the panel and as the plugin's host programs,
   and a user preset library that saves patches as files.
 

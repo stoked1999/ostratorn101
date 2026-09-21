@@ -270,6 +270,15 @@ void OstraTornAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer,
 
     applyPendingPattern();
 
+    // The host's tempo arrives with the playhead.  It is handed to the engine
+    // before the commit below, so a sequencer set to Host follows it in the same
+    // block rather than one block late.
+    if (auto* playHead = getPlayHead()) {
+        if (auto position = playHead->getPosition()) {
+            if (auto bpm = position->getBpm()) adapter_.setHostTempoBpm(*bpm);
+        }
+    }
+
     // Automation: one parameter commit per block, converted to the normalized
     // values the engine's taper expects.
     float values[sh101::kNumParams] = {};

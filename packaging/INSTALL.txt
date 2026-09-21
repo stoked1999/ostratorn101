@@ -50,6 +50,12 @@ Using it
       shift-click or right-click a slot to tie it into the next one
   The sequencer plays what the step editor shows; sequenced presets arrive with
   their pattern already in place.
+* The SEQUENCER section sets the sequencer's tempo:
+      TEMPO       tempo in BPM (20 - 300)
+      DIV         the step's note value at that tempo: 1/4, 1/8, 1/8T, 1/16,
+                  1/16T or 1/32  (1/16 at 120 BPM is eight steps a second)
+      SYNC        Int uses the TEMPO above; Host follows your DAW's tempo and
+                  tracks it as you change it
 * Faders: drag, or double-click to return one to the reference patch.
 * POWER is a real standby: it mutes the output without stopping the note.
 * The LEDs to the right of the nameplate are an output level meter, and the round

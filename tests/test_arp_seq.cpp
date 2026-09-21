@@ -298,7 +298,8 @@ SH101_TEST(seq_parameters_drive_the_engine) {
 
     SH101Params p;
     p.seqOn = true;
-    p.seqRate = 10.0;        // 0.1 s per step: one 4800-sample block per step
+    p.seqBpm = 150.0;        // 1/16 at 150 BPM = 10 steps/s: one 4800-sample
+    p.seqDivision = 3;       // block per step, the same arithmetic as before
     p.seqLength = 2;
     p.seqTranspose = 12;
     p.seqGate = 1.0;
@@ -427,6 +428,120 @@ SH101_TEST(arp_stops_when_the_last_key_is_released) {
     CHECK(stuck == 0);
 }
 
+// ---------------------------------------------------------------------------
+// The sequencer runs on a musical tempo: a BPM and a step division give the step
+// rate, and the clock can follow the host's tempo instead of the panel's.
+// ---------------------------------------------------------------------------
+SH101_TEST(seq_tempo_sets_the_step_interval) {
+    const double sr = 48000.0;
+
+    struct Case { double bpm; int division; double expectHz; };
+    const Case cases[] = {
+        { 120.0, 3,  8.0 },       // 1/16 at 120 BPM: eight steps a second
+        { 120.0, 0,  2.0 },       // 1/4
+        { 120.0, 1,  4.0 },       // 1/8
+        { 120.0, 2,  6.0 },       // 1/8 triplet
+        { 120.0, 4, 12.0 },       // 1/16 triplet
+        {  90.0, 3,  6.0 },
+        { 300.0, 5, 40.0 },       // 1/32 at 300 BPM
+        {  20.0, 0,  1.0 / 3.0 }
+    };
+    for (const Case& c : cases) {
+        SH101Engine engine;
+        engine.prepare(sr, 1);
+        engine.setDeterministicTestMode(true);
+        SH101Params p;
+        p.seqOn = true;
+        p.seqBpm = c.bpm;
+        p.seqDivision = c.division;
+        p.seqSync = 0;
+        engine.setParams(p);
+        const double got = engine.sequencer().rate();
+        std::printf("      %.0f BPM, division %d -> %.4f steps/s (expected %.4f)\n",
+                    c.bpm, c.division, got, c.expectHz);
+        CHECK_NEAR(got, c.expectHz, 1.0e-6);
+    }
+
+    // Host sync: the host's tempo is used when the clock follows it, and the
+    // panel's tempo when it does not.
+    {
+        SH101Engine engine;
+        engine.prepare(sr, 1);
+        SH101Params p;
+        p.seqOn = true;
+        p.seqBpm = 60.0;
+        p.seqDivision = 3;
+        p.seqSync = 1;                     // Host
+        engine.setParams(p);
+        engine.setHostTempoBpm(140.0);
+        engine.setParams(p);               // recommit: the tempo arrived with the playhead
+        CHECK_NEAR(engine.sequencer().rate(), seqStepRateHz(140.0, 3), 1.0e-9);
+
+        p.seqSync = 0;                     // back to the panel's tempo
+        engine.setParams(p);
+        CHECK_NEAR(engine.sequencer().rate(), seqStepRateHz(60.0, 3), 1.0e-9);
+
+        // No host tempo reported: Host falls back to the panel's tempo rather
+        // than stopping the clock.
+        SH101Engine plain;
+        plain.prepare(sr, 1);
+        p.seqSync = 1;
+        plain.setParams(p);
+        CHECK_NEAR(plain.sequencer().rate(), seqStepRateHz(60.0, 3), 1.0e-9);
+    }
+
+    // End to end: at 120 BPM and 1/16 the sequence advances sixteen steps in two
+    // seconds, measured through the running sequencer itself.
+    {
+        SH101Engine engine;
+        engine.prepare(sr, 1);
+        engine.setDeterministicTestMode(true);
+        SH101Params p;
+        p.seqOn = true;
+        p.seqBpm = 120.0;
+        p.seqDivision = 3;
+        p.seqLength = 8;
+        engine.setParams(p);
+        for (int i = 0; i < 8; ++i) engine.sequencer().setStep(i, 48 + i, true, false);
+
+        int firstAt = -1;
+        int secondAt = -1;
+        int last = engine.sequencer().currentIndex();
+        for (int i = 0; i < 20000; ++i) {                    // ~0.42 s, sample by sample
+            engine.renderSample();
+            const int index = engine.sequencer().currentIndex();
+            if (index != last) {
+                last = index;
+                if (firstAt < 0) firstAt = i;
+                else if (secondAt < 0) secondAt = i;
+            }
+        }
+        std::printf("      step interval at 120 BPM 1/16: %d samples (expected 6000)\n",
+                    secondAt - firstAt);
+        CHECK(secondAt - firstAt == 6000);
+    }
+
+    // The tempo controls are appended to the parameter list (session
+    // compatibility) and named for hosts and preset files.
+    CHECK(pSeqBpm == pSeqTranspose + 1);
+    CHECK(pSeqDivision == pSeqBpm + 1);
+    CHECK(pSeqSync == pSeqDivision + 1);
+    CHECK(std::strcmp(paramName(pSeqBpm), "seqBpm") == 0);
+    CHECK(std::strcmp(paramName(pSeqDivision), "seqDivision") == 0);
+    CHECK(std::strcmp(paramName(pSeqSync), "seqSync") == 0);
+    int itemCount = 0;
+    CHECK(paramChoiceItems(pSeqDivision, itemCount) != nullptr && itemCount == 6);
+    CHECK(paramChoiceItems(pSeqSync, itemCount) != nullptr && itemCount == 2);
+
+    for (double bpm : { 20.0, 60.0, 120.0, 200.0, 300.0 }) {
+        SH101Params q;
+        q.seqBpm = bpm;
+        SH101Params back;
+        applyNormalized(back, pSeqBpm, getNormalized(q, pSeqBpm));
+        CHECK_NEAR(back.seqBpm, bpm, 0.5);
+    }
+}
+
 // The same gate, reached from the other direction: switching the note source off
 // while its gate is high must release the note too.
 SH101_TEST(switching_a_note_source_off_releases_a_gated_note) {
@@ -472,7 +587,8 @@ SH101_TEST(switching_a_note_source_off_releases_a_gated_note) {
         engine.setDeterministicTestMode(true);
         SH101Params p;
         p.seqOn = true;
-        p.seqRate = 10.0;
+        p.seqBpm = 240.0;                           // 1/16 at 240 BPM: a step
+        p.seqDivision = 3;                          // every 3000 samples
         p.seqGate = 1.0;                            // gate high for the whole step
         engine.setParams(p);
         engine.sequencer().setStep(0, 60, true, false);

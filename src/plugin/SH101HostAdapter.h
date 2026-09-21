@@ -71,6 +71,7 @@ public:
     void setArpSyncToHost(bool on);
     void setSeqSyncToHost(bool on);
     void hostClockTick();
+    void setHostTempoBpm(double bpm);
 
     // ---- Diagnostics ------------------------------------------------------
     int  pitchBendRangeSemitones() const { return bendRangeSemitones_; }

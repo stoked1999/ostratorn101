@@ -131,7 +131,12 @@ void SH101Engine::applyParams() {
     arp_.setRate(pending_.arpRate);
     arp_.setOctaves(pending_.arpOctaves);
     seq_.setEnabled(pending_.seqOn);
-    seq_.setRate(pending_.seqRate);
+    // The sequencer runs on a musical tempo: its own BPM, or the host's when it
+    // is set to follow the host (and the host has reported one).
+    const double seqTempoBpm = (pending_.seqSync != 0 && hostTempoBpm_ > 0.0)
+                                   ? hostTempoBpm_
+                                   : pending_.seqBpm;
+    seq_.setRate(seqStepRateHz(seqTempoBpm, pending_.seqDivision));
     // v1.0 step-editor controls: the sequence's length, gate and transpose are
     // host parameters, so they arrive with every parameter commit.
     seq_.setLength(pending_.seqLength);
@@ -181,6 +186,10 @@ void SH101Engine::setPitchBendSemitones(double semitones) {
     // Host pitch bend; the default range matches the instrument's bender
     // (modern-host policy: bend maps naturally to the original behaviour).
     bendSemitones_ = clampd(semitones, -24.0, 24.0);
+}
+
+void SH101Engine::setHostTempoBpm(double bpm) {
+    hostTempoBpm_ = (bpm > 0.0) ? bpm : 0.0;
 }
 
 void SH101Engine::setArpSyncToHost(bool hostClock) { arp_.setExternalClock(hostClock); }

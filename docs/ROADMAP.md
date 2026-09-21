@@ -15,6 +15,9 @@ editor and the cymatic display; v1.0 is the release-quality product.
 * Sequencer step editor: 16 slots paged through the 100-step memory — drag a slot
   for pitch, click for a rest, shift/right-click for a tie, REC writes played notes
   in and advances, FOLLOW keeps the page on the running sequence.
+* Sequencer tempo: a musical BPM (20..300) with a step division (1/4 .. 1/32), or
+  the Host clock, which follows the DAW's tempo; the step interval is measured in
+  samples by the test suite.
 * Cymatic display beside the level meter: the standing-wave figure the note makes
   on the plate, drawn on the editor's timer and fed by the audio thread's own
   lock-free block copy.

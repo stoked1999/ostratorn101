@@ -210,7 +210,7 @@ inline void presetTechnoSequence(SH101Params& p) {
     p.pulseWidth = 0.35;
     p.cutoff = 680.0; p.resonance = 0.6; p.filterEnvAmt = 2.4; p.keyTrack = 0.45;
     p.attack = 0.002; p.decay = 0.16; p.sustain = 0.08; p.release = 0.08;
-    p.seqOn = true; p.seqRate = 6.5;
+    p.seqOn = true; p.seqRate = 6.5; p.seqBpm = 98.0; p.seqDivision = 3;
     p.portamentoMode = 0;
 }
 
@@ -218,7 +218,7 @@ inline void presetAcidSequence(SH101Params& p) {
     p.sawLevel = 1.0; p.pulseLevel = 0.0; p.subLevel = 0.15; p.subMode = 0;
     p.cutoff = 240.0; p.resonance = 0.85; p.filterEnvAmt = 3.6; p.keyTrack = 0.5;
     p.attack = 0.002; p.decay = 0.25; p.sustain = 0.05; p.release = 0.1;
-    p.seqOn = true; p.seqRate = 7.5;
+    p.seqOn = true; p.seqRate = 7.5; p.seqBpm = 112.0; p.seqDivision = 3;
     p.portamentoMode = 0;
 }
 
@@ -418,7 +418,7 @@ inline void presetElectroSequence(SH101Params& p) {
     p.sawLevel = 0.9; p.pulseLevel = 0.6; p.subLevel = 0.6; p.subMode = 0;
     p.cutoff = 900.0; p.resonance = 0.5; p.filterEnvAmt = 2.6; p.keyTrack = 0.4;
     p.attack = 0.0015; p.decay = 0.14; p.sustain = 0.0; p.release = 0.08;
-    p.seqOn = true; p.seqRate = 8.0;
+    p.seqOn = true; p.seqRate = 8.0; p.seqBpm = 120.0; p.seqDivision = 3;
     p.portamentoMode = 0;
 }
 

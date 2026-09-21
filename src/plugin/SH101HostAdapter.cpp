@@ -133,6 +133,8 @@ void SH101HostAdapter::hostClockTick() {
     engine_.seqHostClockTick();
 }
 
+void SH101HostAdapter::setHostTempoBpm(double bpm) { engine_.setHostTempoBpm(bpm); }
+
 void SH101HostAdapter::renderBlock(float* mono, int numSamples) {
     engine_.renderBlock(mono, numSamples);
 }

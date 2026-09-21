@@ -53,6 +53,7 @@ public:
     int  currentIndex() const { return index_; }
     int  currentNote() const { return currentNote_; }
     bool gateHigh() const { return gate_; }
+    double rate() const { return rate_; }        // steps per second
     bool enabled() const { return enabled_; }
     int  transpose() const { return transpose_; }
 

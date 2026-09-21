@@ -14,7 +14,8 @@ The suite stands at **82 cases / 3723 checks, all passing**.  New evidence:
 | `arp_stops_when_the_last_key_is_released` | the voice stops for a key release swept across every point of an arp step (16 offsets, guarded against a vacuous pass) — the case that used to leave the note sounding |
 | `switching_a_note_source_off_releases_a_gated_note` | switching ARP or SEQ off while its gate is high releases the note |
 | editor test — step editor | REC writes a played note into the armed step, the write head advances, and the slots paint |
-| editor test — cymatic display | the figure lights with the sound, reads the played note's pitch, takes its petal count from the note, registers the strike, and draws in the panel's amber (7,769 amber pixels) |
+| editor test — cymatic display | the figure lights with the sound, reads the played note's pitch, takes its petal count from the note, registers the strike, and draws in the panel's amber (7,763 amber pixels) |
+| `seq_tempo_sets_the_step_interval` | BPM × division gives the step rate (120 BPM at 1/16 = 8 steps/s, measured as a 6000-sample interval), the Host clock follows the host's tempo and falls back to the panel's when no host tempo is reported, and the three tempo parameters are appended and named |
 
 The cymatic figure is drawn on the editor's timer from the same lock-free block
 copy the audio thread already publishes, so it costs the audio path nothing

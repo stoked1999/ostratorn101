@@ -57,6 +57,9 @@ public:
     void arpHostClockTick();
     void setSeqSyncToHost(bool hostClock);
     void seqHostClockTick();
+    // The host's tempo, in BPM.  The sequencer uses it when its clock is set to
+    // follow the host; 0 means the host has not reported one.
+    void setHostTempoBpm(double bpm);
 
     // Sequencer programming helpers (host/UI side).
     StepSequencer& sequencer() { return seq_; }
@@ -153,6 +156,7 @@ private:
 
     // Host-side modulation.
     double bendSemitones_ = 0.0;
+    double hostTempoBpm_ = 0.0;
     bool   velocityToLevel_ = false;
     double velocity_ = 1.0;
 

@@ -50,6 +50,11 @@ enum ParamId {
     pSeqLength,     // steps in the sequence, 1..100
     pSeqGate,       // gate length as a fraction of a step, 0.05..1
     pSeqTranspose,  // sequence transpose, -24..+24 semitones
+    // Sequencer tempo (appended under the same rule): a musical tempo instead of
+    // a raw clock rate, and a switch to follow the host's tempo.
+    pSeqBpm,        // internal tempo, 20..300 BPM
+    pSeqDivision,   // step note value: 1/4, 1/8, 1/8T, 1/16, 1/16T, 1/32
+    pSeqSync,       // clock source: internal tempo, or the host's tempo
     kNumParams
 };
 
@@ -127,6 +132,9 @@ struct SH101Params {
     int    seqLength = 8;    // steps, 1..100
     double seqGate = 0.5;    // gate length, fraction of a step
     int    seqTranspose = 0; // semitones, -24..+24
+    double seqBpm = 120.0;   // internal tempo, 20..300 BPM
+    int    seqDivision = 3;  // index into kSeqDivisionItems: 0 = 1/4 ... 5 = 1/32
+    int    seqSync = 0;      // 0 = internal tempo, 1 = follow the host tempo
 };
 
 // ---- Normalized (0..1) <-> engineering mapping ------------------------------
@@ -177,6 +185,10 @@ inline void applyNormalized(SH101Params& p, int id, double n) {
         case pSeqLength:      p.seqLength = clampi(1 + (int)std::lround(n * 99.0), 1, 100); break;
         case pSeqGate:        p.seqGate = taperLinear(n, 0.05, 1.0); break;
         case pSeqTranspose:   p.seqTranspose = clampi((int)std::lround(taperLinear(n, -24.0, 24.0)), -24, 24); break;
+        // Tempo is a fader throw over a 15:1 range, like the other rate controls.
+        case pSeqBpm:         p.seqBpm = taperExponential(n, 20.0, 300.0); break;
+        case pSeqDivision:    p.seqDivision = clampi((int)(n * 5.999), 0, 5); break;
+        case pSeqSync:        p.seqSync = (n >= 0.5) ? 1 : 0; break;
         default: break;
     }
 }
@@ -220,6 +232,9 @@ inline double getNormalized(const SH101Params& p, int id) {
         case pSeqLength:      return (clampi(p.seqLength, 1, 100) - 1) / 99.0;
         case pSeqGate:        return (clampd(p.seqGate, 0.05, 1.0) - 0.05) / 0.95;
         case pSeqTranspose:   return (clampi(p.seqTranspose, -24, 24) + 24.0) / 48.0;
+        case pSeqBpm:         return taperExponentialInverse(p.seqBpm, 20.0, 300.0);
+        case pSeqDivision:    return clampi(p.seqDivision, 0, 5) / 5.0;
+        case pSeqSync:        return p.seqSync ? 1.0 : 0.0;
         default: return 0.0;
     }
 }
@@ -232,7 +247,7 @@ inline const char* paramName(int id) {
         "keyTrack", "attack", "decay", "sustain", "release", "envTrigger", "vcaMode",
         "portamentoTime", "portamentoMode", "volume", "bend", "arpOn", "arpMode",
         "arpRate", "arpOctaves", "seqOn", "seqRate", "seqLength", "seqGate",
-        "seqTranspose"
+        "seqTranspose", "seqBpm", "seqDivision", "seqSync"
     };
     return (id >= 0 && id < kNumParams) ? names[id] : "?";
 }
@@ -296,6 +311,38 @@ inline const char* const* kOnOffItems(int& n) {
     return items;
 }
 
+inline const char* const* kSeqDivisionItems(int& n) {
+    // Step note values: the sequencer advances one step per beat at 1/4, twice
+    // per beat at 1/8, and the triplet values place three and six to the beat.
+    static const char* items[] = { "1/4", "1/8", "1/8T", "1/16", "1/16T", "1/32" };
+    n = 6;
+    return items;
+}
+
+inline const char* const* kSeqSyncItems(int& n) {
+    static const char* items[] = { "Int", "Host" };
+    n = 2;
+    return items;
+}
+
+// Steps per beat at a division index.  Shared by the engine, the panel read-out
+// and the tests, so a tempo means the same thing everywhere.
+inline double seqStepsPerBeat(int division) {
+    switch (clampi(division, 0, 5)) {
+        case 0:  return 1.0;    // 1/4
+        case 1:  return 2.0;    // 1/8
+        case 2:  return 3.0;    // 1/8 triplet
+        case 3:  return 4.0;    // 1/16
+        case 4:  return 6.0;    // 1/16 triplet
+        default: return 8.0;    // 1/32
+    }
+}
+
+// The sequencer's step rate for a tempo and a division.
+inline double seqStepRateHz(double bpm, int division) {
+    return clampd(bpm / 60.0 * seqStepsPerBeat(division), 0.05, 60.0);
+}
+
 // Returns the choice list for a switch-like parameter, or nullptr for
 // continuous parameters.
 inline const char* const* paramChoiceItems(int paramId, int& count) {
@@ -311,6 +358,8 @@ inline const char* const* paramChoiceItems(int paramId, int& count) {
         case pArpMode:        return kArpModeItems(count);
         case pArpOn:
         case pSeqOn:          return kOnOffItems(count);
+        case pSeqDivision:    return kSeqDivisionItems(count);
+        case pSeqSync:        return kSeqSyncItems(count);
         default:              return nullptr;
     }
 }

@@ -144,7 +144,7 @@ Patch makePatch(const std::string& name) {
         q.pulseLevel = 1.0; q.sawLevel = 0.5; q.subLevel = 0.5;
         q.cutoff = 700.0; q.resonance = 0.4; q.filterEnvAmt = 2.0;
         q.decay = 0.18; q.sustain = 0.1; q.release = 0.1;
-        q.seqOn = true; q.seqRate = 6.0;
+        q.seqOn = true; q.seqRate = 6.0; q.seqBpm = 90.0; q.seqDivision = 3;
         p.seq = true;
         p.seqSteps = {
             { 36, 1, 0 }, { 48, 1, 0 }, { 36, 1, 1 }, { 43, 0, 0 },

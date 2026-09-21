@@ -44,7 +44,7 @@ const char* const kDisplayName[kNumParams] = {
     "ATK",       "DEC",       "SUS",     "REL",     "TRIG",     "VCA",
     "TIME",      "MODE",      "VOL",     "BEND",    "ARP ON",   "ARP MODE",
     "ARP RATE",  "ARP OCT",   "SEQ ON",  "SEQ RATE", "SEQ LEN",  "GATE",
-    "TRANS",
+    "TRANS",     "TEMPO",     "DIV",     "SYNC",
 };
 
 // ---- Tooltips, in sh101::ParamId order ---------------------------------------
@@ -86,6 +86,9 @@ const char* const kTooltip[kNumParams] = {
     "Sequence length in steps (1..100), set by the step editor's pages",
     "Gate length: how much of each step a note is held for",
     "Sequence transpose, +/-24 semitones",
+    "Sequencer tempo in BPM (20..300), used when the clock is set to Int",
+    "Step note value at that tempo: 1/4, 1/8, 1/8T, 1/16, 1/16T or 1/32",
+    "Sequencer clock: Int (the tempo above) or Host (follow the host's tempo)",
 };
 
 juce::String millisecondsText(double seconds) {
@@ -133,6 +136,13 @@ juce::String formatParamValue(int paramId, double normalized) {
         case pSeqTranspose:
             return (p.seqTranspose > 0 ? "+" : "") + juce::String(p.seqTranspose) + " st";
         case pArpOctaves:      return juce::String(p.arpOctaves) + "oct";
+        case pSeqBpm:          return juce::String(juce::roundToInt(p.seqBpm)) + " BPM";
+        case pSeqDivision: {
+            int count = 0;
+            const char* const* items = kSeqDivisionItems(count);
+            return juce::String(items[clampi(p.seqDivision, 0, count - 1)]);
+        }
+        case pSeqSync:         return p.seqSync ? "Host" : "Int";
         default:               return juce::String(normalized, 2);
     }
 }
@@ -272,7 +282,8 @@ OstraTornAudioProcessorEditor::OstraTornAudioProcessorEditor(OstraTornAudioProce
     addPanel(0, "ENV", { pAttack, pDecay, pSustain, pRelease, pEnvTrigger });
 
     addPanel(1, "ARPEGGIATOR", { pArpOn, pArpMode, pArpRate, pArpOctaves });
-    addPanel(1, "SEQUENCER", { pSeqOn, pSeqRate, pSeqLength, pSeqGate, pSeqTranspose });
+    addPanel(1, "SEQUENCER", { pSeqOn, pSeqBpm, pSeqDivision, pSeqLength, pSeqGate,
+                               pSeqTranspose, pSeqSync });
     addPanel(1, "PERFORMANCE", { pPortamentoMode, pPortamentoTime, pBend });
 
     // The step editor closes the panel: 16 slots, paged through the whole
