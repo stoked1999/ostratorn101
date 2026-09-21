@@ -43,6 +43,11 @@ FORBIDDEN = [
 # legitimately mention a forbidden token (comments documenting the rule).
 ALLOWED_FILE_PATTERNS = [
     r"^src/sh101/Params\.h$",      # parameter tables only, no audio-path state
+    # Preset files are read and written on the message thread (save/load, the
+    # host's state blob); nothing in this header runs during rendering.  The
+    # callback itself is covered by the runtime allocator sentinel in
+    # tests/test_engine.cpp.
+    r"^src/sh101/PresetIO\.h$",
 ]
 
 # Comments are stripped before scanning, so the many "brief: no heap allocations"
