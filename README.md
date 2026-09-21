@@ -6,7 +6,10 @@ brief in [`docs/engineering-brief.md`](docs/engineering-brief.md) (revision
 "SONIC FIDELITY FIRST").  The panel credits the instrument it is inspired by and
 reproduces no manufacturer branding.
 
-Status: **complete, built, installed and verified.**
+Status: **working prototype — complete, built, installed and verified.** This is
+the release-quality starting point: [`docs/ROADMAP.md`](docs/ROADMAP.md) tracks
+what is finished and what is still open (sequencer step editor, randomizer,
+animation, product completeness).
 
 * The DSP voice is validated by the engine test suite: **78 cases / 3518 checks**,
   plus a preset-bank suite and a preset-file suite.
@@ -89,15 +92,18 @@ whole library, and **SAVE / LOAD / MENU** manage the user library.
 ## Build and run
 
 ```bash
-# The DSP engine, its tests and the headless renderer (needs only the zig toolchain)
-bash build.sh && ./build/sh101_tests.exe
-./build/sh101_render.exe --list-presets
-./build/sh101_render.exe --preset "Acid Bass" renders/acid.wav
+# The DSP engine, its tests and the headless renderer (no SDK needed — any C++20 compiler)
+bash build.sh && ./build/sh101_tests
+./build/sh101_render --list-presets
+./build/sh101_render --preset "Acid Bass" renders/acid.wav
 
-# The plugin (needs MSVC + a JUCE checkout; see docs/VST3.md)
-MSYS_NO_PATHCONV=1 cmd /c "C:\Users\bbhal\sh101\tools\build_vst3_msvc.bat"
-powershell -NoProfile -ExecutionPolicy Bypass -File tools/install_vst3_all.ps1
+# The plugin (needs MSVC + a JUCE 8.x checkout)
+tools/build_vst3_msvc.bat
 ```
+
+See **[docs/BUILDING.md](docs/BUILDING.md)** for both paths in full — requirements
+per platform, what `build.sh` produces, how to run the host/editor verification
+binaries, and where to start reading the code.
 
 ## Fidelity milestones
 
